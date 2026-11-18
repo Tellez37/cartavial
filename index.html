@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>CartaVial — Inteligencia ciudadana para movernos mejor en Cartagena</title>
+  <meta name="description" content="Mapa interactivo colaborativo de incidentes viales en Cartagena de Indias (choques, vías cerradas y semáforos dañados) basado en datos abiertos." />
+  <meta name="theme-color" content="#0f172a" />
+
+  <!-- Leaflet CSS (OpenStreetMap) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Cabecera compacta pensada para celulares -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo" aria-hidden="true">
+        <span class="pulse-dot"></span>
+        CV
+      </div>
+      <div class="brand-text">
+        <h1>CartaVial <span class="badge-city">Cartagena</span></h1>
+        <p id="status-subtitle">Datos abiertos en tiempo real · Colaboración ciudadana</p>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <button id="btn-refresh" class="icon-btn" title="Actualizar mapa desde la fuente de datos" aria-label="Actualizar mapa">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+          <path d="M16 16h5v5"/>
+        </svg>
+      </button>
+      <button id="btn-open-json" class="pill-action-btn" title="Ver API / JSON de datos abiertos">
+        <span>{ } JSON</span>
+      </button>
+      <button id="btn-open-config" class="pill-action-btn config-btn" title="Conectar Google Forms y Google Sheets">
+        <span>⚙️ Sheets</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Barra flotante de filtros por tipo de incidente y corredores clave -->
+  <section class="controls-overlay" aria-label="Filtros del mapa">
+    <div class="filter-chips" role="tablist">
+      <button class="chip active" data-filter="todos" role="tab" aria-selected="true">
+        Todos <span class="chip-count" id="count-todos">0</span>
+      </button>
+      <button class="chip chip-choque" data-filter="Choque" role="tab" aria-selected="false">
+        <span class="dot dot-choque"></span> Choque <span class="chip-count" id="count-choque">0</span>
+      </button>
+      <button class="chip chip-via" data-filter="Vía cerrada" role="tab" aria-selected="false">
+        <span class="dot dot-via"></span> Vía cerrada <span class="chip-count" id="count-via">0</span>
+      </button>
+      <button class="chip chip-semaforo" data-filter="Semáforo dañado" role="tab" aria-selected="false">
+        <span class="dot dot-semaforo"></span> Semáforo dañado <span class="chip-count" id="count-semaforo">0</span>
+      </button>
+    </div>
+
+    <div class="corridor-bar">
+      <span class="corridor-label">Ir a:</span>
+      <button class="corridor-btn" data-lat="10.4055" data-lng="-75.5120" data-zoom="13">Vista General</button>
+      <button class="corridor-btn" data-lat="10.4150" data-lng="-75.5240" data-zoom="15">Av. Pedro de Heredia</button>
+      <button class="corridor-btn" data-lat="10.3548" data-lng="-75.4981" data-zoom="14">Mamonal</button>
+      <button class="corridor-btn" data-lat="10.3912" data-lng="-75.4795" data-zoom="15">El Amparo / Ronda Real</button>
+      <button class="corridor-btn" data-lat="10.4228" data-lng="-75.5455" data-zoom="15">Centro / Getsemaní</button>
+    </div>
+  </section>
+
+  <!-- Banner de selección de punto en el mapa (cuando el usuario elige tocar el mapa) -->
+  <div id="map-pick-banner" class="map-pick-banner hidden">
+    <span>👆 Toca el lugar exacto del incidente en el mapa de Cartagena</span>
+    <button id="btn-cancel-pick" type="button">Cancelar</button>
+  </div>
+
+  <!-- Contenedor principal del mapa OpenStreetMap + Leaflet -->
+  <main class="map-wrapper">
+    <div id="map" role="application" aria-label="Mapa interactivo de incidentes viales en Cartagena"></div>
+  </main>
+
+  <!-- Botón flotante principal del MVP: "Reportar incidente" -->
+  <div class="fab-container">
+    <button id="btn-locate-me" class="fab-secondary" title="Centrar en mi ubicación actual" aria-label="Mi ubicación">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+        <circle cx="12" cy="12" r="7"/>
+      </svg>
+    </button>
+
+    <button id="btn-report-incident" class="fab-primary">
+      <span class="fab-icon">🚨</span>
+      <span>Reportar incidente</span>
+    </button>
+  </div>
+
+  <!-- MODAL 1: Formulario ultrarrápido de 3 preguntas (MVP) -->
+  <div id="modal-report" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-report-title">
+    <div class="modal-sheet">
+      <div class="sheet-handle"></div>
+      <div class="modal-header">
+        <div>
+          <span class="modal-tag">Colaboración Ciudadana · 3 Pasos</span>
+          <h2 id="modal-report-title">Reportar incidente vial</h2>
+        </div>
+        <button id="btn-close-report" class="close-btn" aria-label="Cerrar formulario">&times;</button>
+      </div>
+
+      <p class="modal-desc">
+        Tu reporte actualiza el mapa público de Cartagena para que conductores de Transcaribe, motos, busetas y peatones tomen desvíos a tiempo.
+      </p>
+
+      <!-- Opción para abrir el Google Form original en una pestaña si ya está configurado -->
+      <div id="external-form-banner" class="external-form-banner hidden">
+        <span>¿Prefieres llenar el formulario directo en Google Forms?</span>
+        <a id="link-external-google-form" href="#" target="_blank" rel="noopener noreferrer">Abrir Google Form ↗</a>
+      </div>
+
+      <form id="form-incident" autocomplete="off">
+        <!-- Pregunta 1: Tipo de problema -->
+        <div class="form-group">
+          <label class="form-label">1. Tipo de problema <span class="req">*</span></label>
+          <div class="incident-type-grid">
+            <label class="type-card">
+              <input type="radio" name="tipo" value="Choque" required checked />
+              <span class="type-card-body">
+                <span class="type-emoji">💥</span>
+                <span class="type-name">Choque</span>
+                <span class="type-sub">Colisión o accidente</span>
+              </span>
+            </label>
+
+            <label class="type-card">
+              <input type="radio" name="tipo" value="Vía cerrada" />
+              <span class="type-card-body">
+                <span class="type-emoji">🚧</span>
+                <span class="type-name">Vía cerrada</span>
+                <span class="type-sub">Obra, bloqueo o desvío</span>
+              </span>
+            </label>
+
+            <label class="type-card">
+              <input type="radio" name="tipo" value="Semáforo dañado" />
+              <span class="type-card-body">
+                <span class="type-emoji">🚦</span>
+                <span class="type-name">Semáforo dañado</span>
+                <span class="type-sub">Apagado o intermitente</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Pregunta 2: Barrio / Sector -->
+        <div class="form-group">
+          <label class="form-label" for="input-sector">2. Barrio o sector <span class="req">*</span></label>
+          <input
+            type="text"
+            id="input-sector"
+            name="sector"
+            list="sectores-cartagena"
+            placeholder="Ej: Av. Pedro de Heredia - Bazurto, Mamonal Km 4..."
+            required
+          />
+          <datalist id="sectores-cartagena">
+            <option value="Av. Pedro de Heredia - Mercado de Bazurto"></option>
+            <option value="Av. Pedro de Heredia - Pie de la Popa"></option>
+            <option value="Av. Pedro de Heredia - Cuatro Vientos"></option>
+            <option value="Av. Pedro de Heredia - María Auxiliadora"></option>
+            <option value="Av. Pedro de Heredia - Villa Olímpica / Ejecutivos"></option>
+            <option value="Bomba El Amparo - Ronda Real"></option>
+            <option value="Vía Mamonal - Zona Industrial"></option>
+            <option value="Vía Mamonal - Puerta de Hierro / Ceballos"></option>
+            <option value="Av. Crisanto Luque - El Bosque"></option>
+            <option value="Centro Histórico - Torre del Reloj / Matuna"></option>
+            <option value="Getsemaní - Calle Media Luna / Puente Román"></option>
+            <option value="Bocagrande - Av. San Martín"></option>
+            <option value="Crespo - Vía al Mar / Túnel"></option>
+            <option value="Torices - Paseo de Bolívar"></option>
+            <option value="Transversal 54 - El Country / Los Corales"></option>
+            <option value="La Castellana / Los Alpes"></option>
+            <option value="El Pozón - La Cordialidad"></option>
+          </datalist>
+          <div class="quick-sector-pills">
+            <button type="button" class="sector-pill" data-sector="Av. Pedro de Heredia - Bazurto">Pedro de Heredia</button>
+            <button type="button" class="sector-pill" data-sector="Vía Mamonal - Ceballos">Mamonal</button>
+            <button type="button" class="sector-pill" data-sector="Bomba El Amparo">El Amparo</button>
+            <button type="button" class="sector-pill" data-sector="Pie de la Popa">Pie de la Popa</button>
+            <button type="button" class="sector-pill" data-sector="El Bosque - Crisanto Luque">El Bosque</button>
+          </div>
+        </div>
+
+        <!-- Pregunta 3: Enlace de ubicación de Google Maps -->
+        <div class="form-group">
+          <label class="form-label" for="input-maps-url">3. Enlace de ubicación de Google Maps <span class="req">*</span></label>
+          <input
+            type="text"
+            id="input-maps-url"
+            name="mapsUrl"
+            placeholder="https://www.google.com/maps?q=10.405,-75.512 o pega tu link"
+            required
+          />
+          <div class="location-helpers">
+            <button type="button" id="btn-use-gps" class="helper-btn">
+              📍 Generar link con mi GPS
+            </button>
+            <button type="button" id="btn-pick-on-map" class="helper-btn">
+              🗺️ Elegir punto en el mapa
+            </button>
+          </div>
+          <small id="coord-preview" class="form-hint">
+            Puedes pegar un link de Google Maps, usar tu GPS en 1 toque o tocar el punto en el mapa.
+          </small>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" id="btn-submit-report" class="submit-btn">
+            Publicar incidente en el mapa
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Visor de API de Datos Abiertos (JSON) -->
+  <div id="modal-json" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-json-title">
+    <div class="modal-sheet modal-wide">
+      <div class="sheet-handle"></div>
+      <div class="modal-header">
+        <div>
+          <span class="modal-tag">Bien Común · Datos Abiertos</span>
+          <h2 id="modal-json-title">JSON Público de Movilidad (CartaVial)</h2>
+        </div>
+        <button id="btn-close-json" class="close-btn" aria-label="Cerrar visor JSON">&times;</button>
+      </div>
+      <p class="modal-desc">
+        A diferencia de las plataformas privadas que monopolizan la ubicación, CartaVial expone los reportes ciudadanos como datos abiertos reutilizables en formato JSON.
+      </p>
+      <div class="json-toolbar">
+        <button id="btn-copy-json" class="helper-btn">📋 Copiar JSON</button>
+        <button id="btn-download-json" class="helper-btn">⬇️ Descargar incidentes.json</button>
+        <button id="btn-reset-demo" class="helper-btn danger-btn">🔄 Restaurar datos iniciales</button>
+      </div>
+      <pre id="json-viewer" class="json-code"></pre>
+    </div>
+  </div>
+
+  <!-- MODAL 3: Configuración de Google Sheets y Google Forms -->
+  <div id="modal-config" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-config-title">
+    <div class="modal-sheet modal-wide">
+      <div class="sheet-handle"></div>
+      <div class="modal-header">
+        <div>
+          <span class="modal-tag">Integración Cloud · Sin servidores costosos</span>
+          <h2 id="modal-config-title">Conectar Google Sheets y Google Forms</h2>
+        </div>
+        <button id="btn-close-config" class="close-btn" aria-label="Cerrar configuración">&times;</button>
+      </div>
+
+      <p class="modal-desc">
+        CartaVial ya funciona de inmediato con la base de datos local/demo. Para conectarlo en vivo a tu hoja de cálculo de Google Sheets, pega el link de tu hoja pública aquí:
+      </p>
+
+      <form id="form-config">
+        <div class="form-group">
+          <label class="form-label" for="input-sheet-url">
+            1. Link o ID de tu Google Sheet (Base de datos pública)
+          </label>
+          <input
+            type="text"
+            id="input-sheet-url"
+            placeholder="https://docs.google.com/spreadsheets/d/TU_ID_AQUI/edit?usp=sharing"
+          />
+          <small class="form-hint">
+            En Google Sheets haz clic en <strong>Compartir → Cualquier persona con el enlace (Lector)</strong> o <strong>Archivo → Compartir → Publicar en la web</strong> y pega el link arriba. CartaVial lo transforma automáticamente a JSON mediante el endpoint público <code>/gviz/tq?tqx=out:json</code>.
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="input-form-url">
+            2. Link de tu Google Form o Apps Script (Opcional)
+          </label>
+          <input
+            type="text"
+            id="input-form-url"
+            placeholder="https://docs.google.com/forms/d/e/.../viewform"
+          />
+          <small class="form-hint">
+            Si pegas el link de tu Google Form, los usuarios tendrán un enlace directo para abrirlo, o si pegas la URL de un Web App de Google Apps Script se guardará automáticamente cada reporte en tu Google Sheet.
+          </small>
+        </div>
+
+        <div class="config-steps-box">
+          <strong>Columnas esperadas en tu Google Form / Google Sheet:</strong>
+          <ol>
+            <li><strong>Marca temporal</strong> (la crea Google Forms automáticamente)</li>
+            <li><strong>Tipo de problema</strong> (Choque, Vía cerrada, Semáforo dañado)</li>
+            <li><strong>Barrio o sector</strong> (Texto libre, ej. Av. Pedro de Heredia)</li>
+            <li><strong>Enlace de ubicación de Google Maps</strong> (Link de Google Maps)</li>
+          </ol>
+        </div>
+
+        <div class="form-actions config-actions">
+          <button type="button" id="btn-test-sheet" class="helper-btn">🔍 Probar lectura JSON</button>
+          <button type="submit" class="submit-btn">Guardar conexión</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast de notificación rápida -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- Lógica principal de CartaVial -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ctg-001",
+    "tipo": "Choque",
+    "sector": "Av. Pedro de Heredia - Mercado de Bazurto",
+    "mapsUrl": "https://www.google.com/maps?q=10.4136,-75.5219",
+    "lat": 10.4136,
+    "lng": -75.5219,
+    "fecha": "Hace 12 min",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-002",
+    "tipo": "Semáforo dañado",
+    "sector": "Bomba El Amparo - Cruce Ronda Real",
+    "mapsUrl": "https://www.google.com/maps?q=10.3912,-75.4795",
+    "lat": 10.3912,
+    "lng": -75.4795,
+    "fecha": "Hace 25 min",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-003",
+    "tipo": "Vía cerrada",
+    "sector": "Vía Mamonal Km 4 - Puerta de Hierro",
+    "mapsUrl": "https://www.google.com/maps?q=10.3548,-75.4981",
+    "lat": 10.3548,
+    "lng": -75.4981,
+    "fecha": "Hace 38 min",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-004",
+    "tipo": "Choque",
+    "sector": "Pie de la Popa - Estación Lo Amador (Av. Pedro de Heredia)",
+    "mapsUrl": "https://www.google.com/maps?q=10.4208,-75.5342",
+    "lat": 10.4208,
+    "lng": -75.5342,
+    "fecha": "Hace 45 min",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-005",
+    "tipo": "Semáforo dañado",
+    "sector": "Av. Crisanto Luque - Diagonal 21 (El Bosque)",
+    "mapsUrl": "https://www.google.com/maps?q=10.3965,-75.5158",
+    "lat": 10.3965,
+    "lng": -75.5158,
+    "fecha": "Hace 1 hora",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-006",
+    "tipo": "Vía cerrada",
+    "sector": "Centro / Getsemaní - Calle Media Luna",
+    "mapsUrl": "https://www.google.com/maps?q=10.4225,-75.5441",
+    "lat": 10.4225,
+    "lng": -75.5441,
+    "fecha": "Hace 1 hora",
+    "fuente": "Reporte ciudadano"
+  }
+]
