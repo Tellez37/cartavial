@@ -1,6 +1,6 @@
 /**
  * CartaVial — Inteligencia ciudadana para movernos mejor en Cartagena
- * Rediseño UX/UI Senior: Estética Google Maps + Waze · Datos Abiertos
+ * Rediseño UX/UI Senior: Estética Google Maps + Waze · Auto-expiración de reportes
  */
 
 // ============================================================================
@@ -15,6 +15,9 @@ const DEFAULT_CONFIG = {
   cartagenaCenter: [10.4025, -75.5140],
   defaultZoom: 13
 };
+
+// Vigencia máxima automática de cada reporte en el mapa: 2 horas
+const EXPIRATION_MS = 2 * 60 * 60 * 1000;
 
 // ============================================================================
 // 2. DICCIONARIO GEORREFERENCIADO DE SECTORES Y VÍAS DE CARTAGENA
@@ -42,85 +45,16 @@ const SECTORES_CARTAGENA = [
   { keywords: ["pedro de heredia"], lat: 10.4095, lng: -75.5105 }
 ];
 
-const FALLBACK_INCIDENTS = [
-  {
-    id: "ctg-001",
-    tipo: "Choque",
-    sector: "Av. Pedro de Heredia - Mercado de Bazurto",
-    mapsUrl: "https://www.google.com/maps?q=10.4136,-75.5219",
-    lat: 10.4136,
-    lng: -75.5219,
-    fecha: "Hace 12 min",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-002",
-    tipo: "Semáforo dañado",
-    sector: "Bomba El Amparo - Cruce Ronda Real",
-    mapsUrl: "https://www.google.com/maps?q=10.3912,-75.4795",
-    lat: 10.3912,
-    lng: -75.4795,
-    fecha: "Hace 25 min",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-003",
-    tipo: "Vía cerrada",
-    sector: "Vía Mamonal Km 4 - Puerta de Hierro",
-    mapsUrl: "https://www.google.com/maps?q=10.3548,-75.4981",
-    lat: 10.3548,
-    lng: -75.4981,
-    fecha: "Hace 38 min",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-004",
-    tipo: "Choque",
-    sector: "Pie de la Popa - Estación Lo Amador (Av. Pedro de Heredia)",
-    mapsUrl: "https://www.google.com/maps?q=10.4208,-75.5342",
-    lat: 10.4208,
-    lng: -75.5342,
-    fecha: "Hace 45 min",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-005",
-    tipo: "Semáforo dañado",
-    sector: "Av. Crisanto Luque - Diagonal 21 (El Bosque)",
-    mapsUrl: "https://www.google.com/maps?q=10.3965,-75.5158",
-    lat: 10.3965,
-    lng: -75.5158,
-    fecha: "Hace 1 hora",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-006",
-    tipo: "Vía cerrada",
-    sector: "Centro / Getsemaní - Calle Media Luna",
-    mapsUrl: "https://www.google.com/maps?q=10.4225,-75.5441",
-    lat: 10.4225,
-    lng: -75.5441,
-    fecha: "Hace 1 hora",
-    fuente: "Reporte ciudadano"
-  },
-  {
-    id: "ctg-007",
-    tipo: "Hueco",
-    sector: "Av. Pedro de Heredia - Sector Cuatro Vientos (Carril Mixto)",
-    mapsUrl: "https://www.google.com/maps?q=10.4079,-75.5061",
-    lat: 10.4079,
-    lng: -75.5061,
-    fecha: "Hace 1 hora",
-    fuente: "Reporte ciudadano"
-  }
-];
+// Sin incidentes fijos estáticos para que nunca queden pines eternos sin borrarse
+const FALLBACK_INCIDENTS = [];
 
 // ============================================================================
 // 3. ESTADO GLOBAL
 // ============================================================================
 const STORAGE_KEYS = {
-  LOCAL_REPORTS: "cartavial_reportes_locales_v2",
-  CONFIG: "cartavial_config_v2"
+  LOCAL_REPORTS: "cartavial_reportes_locales_v3",
+  CONFIG: "cartavial_config_v3",
+  DISMISSED: "cartavial_despejados_v3"
 };
 
 let map;
@@ -132,7 +66,7 @@ let tempPickMarker = null;
 let lastDataSignature = "";
 
 // ============================================================================
-// 4. INICIALIZACIÓN DEL MAPA (Estética Limpia estilo Google Maps)
+// 4. INICIALIZACIÓN DEL MAPA
 // ============================================================================
 document.addEventListener("DOMContentLoaded", async () => {
   initMap();
@@ -140,10 +74,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   await syncPendingLocalReportsToServer();
   await loadAllData();
 
-  // Sincronización automática en tiempo real cada 3.5 segundos
+  // Sincronización y limpieza automática de expirados cada 4 segundos
   setInterval(() => {
     loadAllData(true);
-  }, 3500);
+  }, 4000);
 });
 
 function initMap() {
@@ -171,7 +105,74 @@ function initMap() {
 }
 
 // ============================================================================
-// 5. EXTRACCIÓN DE COORDENADAS DESDE LINKS DE GOOGLE MAPS O SECTOR
+// 5. CÁLCULO DE TIEMPO Y AUTO-EXPIRACIÓN (2 HORAS)
+// ============================================================================
+function parseIncidentTimestamp(item) {
+  if (item.createdAt && !isNaN(Number(item.createdAt))) {
+    return Number(item.createdAt);
+  }
+
+  // Si el ID tiene formato ctg-1794975459897
+  if (item.id && /^ctg-(\d{12,14})$/.test(String(item.id))) {
+    return Number(String(item.id).replace("ctg-", ""));
+  }
+
+  const rawDate = String(item.fecha || "").trim();
+  if (!rawDate) return Date.now();
+
+  // Formato es-CO de Google Sheets: "20/11/2026, 10:00:20 a. m." o "20/11/2026 14:30:00"
+  const coMatch = rawDate.match(
+    /(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?\s*m\.?)?)?/i
+  );
+  if (coMatch) {
+    const day = parseInt(coMatch[1], 10);
+    const month = parseInt(coMatch[2], 10) - 1;
+    const year = parseInt(coMatch[3], 10);
+    let hour = coMatch[4] ? parseInt(coMatch[4], 10) : 0;
+    const minute = coMatch[5] ? parseInt(coMatch[5], 10) : 0;
+    const second = coMatch[6] ? parseInt(coMatch[6], 10) : 0;
+    const ampm = (coMatch[7] || "").toLowerCase();
+
+    if (ampm.includes("p") && hour < 12) hour += 12;
+    if (ampm.includes("a") && hour === 12) hour = 0;
+
+    const parsedTime = new Date(year, month, day, hour, minute, second).getTime();
+    if (!isNaN(parsedTime)) return parsedTime;
+  }
+
+  const nativeParsed = Date.parse(rawDate);
+  if (!isNaN(nativeParsed)) return nativeParsed;
+
+  return Date.now();
+}
+
+function isIncidentExpired(createdAt) {
+  const ageMs = Date.now() - createdAt;
+  return ageMs > EXPIRATION_MS;
+}
+
+function formatTimeAgo(createdAt) {
+  const diffSec = Math.max(0, Math.floor((Date.now() - createdAt) / 1000));
+  if (diffSec < 60) return "Hace menos de 1 min";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `Hace ${diffMin} min`;
+  const hours = Math.floor(diffMin / 60);
+  const mins = diffMin % 60;
+  return mins > 0 ? `Hace ${hours} h ${mins} min` : `Hace ${hours} h`;
+}
+
+function formatTimeRemaining(createdAt) {
+  const remainingMs = Math.max(0, EXPIRATION_MS - (Date.now() - createdAt));
+  const totalMin = Math.ceil(remainingMs / 60000);
+  if (totalMin <= 1) return "Se borra en 1 min";
+  if (totalMin < 60) return `Se borra en ${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `Se borra en ${h} h ${m} min` : `Se borra en ${h} h`;
+}
+
+// ============================================================================
+// 6. EXTRACCIÓN DE COORDENADAS DESDE LINKS DE GOOGLE MAPS O SECTOR
 // ============================================================================
 function extractCoordinates(mapsUrl, sectorText = "") {
   const raw = String(mapsUrl || "").trim();
@@ -243,7 +244,7 @@ function normalizeIncidentType(rawType) {
 }
 
 // ============================================================================
-// 6. SINCRONIZACIÓN Y LECTURA DE DATOS ABIERTOS (SERVIDOR + GOOGLE SHEETS)
+// 7. SINCRONIZACIÓN Y LECTURA DE DATOS ABIERTOS (CON FILTRO DE EXPIRACIÓN)
 // ============================================================================
 async function syncPendingLocalReportsToServer() {
   const localReports = getLocalReports();
@@ -260,7 +261,7 @@ async function syncPendingLocalReportsToServer() {
     }
     localStorage.removeItem(STORAGE_KEYS.LOCAL_REPORTS);
   } catch {
-    // Mantiene respaldo local si no hay servidor con API
+    // Mantiene respaldo local si se ejecuta en servidor estático como GitHub Pages
   }
 }
 
@@ -282,6 +283,7 @@ async function loadAllData(silent = false) {
     }
 
     const localReports = getLocalReports();
+    const dismissedKeys = getDismissedKeys();
     const cfg = getConfig();
     let sheetIncidents = [];
     const configBtn = document.getElementById("btn-open-config");
@@ -291,9 +293,6 @@ async function loadAllData(silent = false) {
       try {
         sheetIncidents = await fetchGoogleSheetAsJson(cfg.googleSheetUrl.trim());
         if (configBtn) configBtn.classList.add("connected");
-        if (subtitle) {
-          subtitle.textContent = `Google Sheets activo (${sheetIncidents.length} reportes)`;
-        }
       } catch (err) {
         console.warn("Error leyendo Google Sheet:", err);
         if (!silent) {
@@ -302,27 +301,49 @@ async function loadAllData(silent = false) {
       }
     } else {
       if (configBtn) configBtn.classList.remove("connected");
-      if (subtitle) {
+    }
+
+    const seenKeys = new Set();
+    const combined = [];
+
+    for (const item of [...localReports, ...sheetIncidents, ...baseIncidents]) {
+      const createdAt = parseIncidentTimestamp(item);
+
+      // 1) Descartar automáticamente si ya pasaron más de 2 horas
+      if (isIncidentExpired(createdAt)) {
+        continue;
+      }
+
+      const normalizedType = normalizeIncidentType(item.tipo);
+      const dedupeKey = `${normalizeText(normalizedType)}|${normalizeText(item.sector)}|${Number(item.lat).toFixed(4)}|${Number(item.lng).toFixed(4)}`;
+
+      // 2) Descartar si un usuario lo marcó como "Vía despejada"
+      if (dismissedKeys.includes(dedupeKey) || (item.id && dismissedKeys.includes(String(item.id)))) {
+        continue;
+      }
+
+      if (!seenKeys.has(dedupeKey)) {
+        seenKeys.add(dedupeKey);
+        combined.push({
+          ...item,
+          tipo: normalizedType,
+          createdAt,
+          dedupeKey,
+          fecha: formatTimeAgo(createdAt),
+          expiraTexto: formatTimeRemaining(createdAt)
+        });
+      }
+    }
+
+    if (subtitle) {
+      if (cfg.googleSheetUrl && cfg.googleSheetUrl.trim() !== "") {
+        subtitle.textContent = `En vivo · ${combined.length} reporte(s) activos (se borran a las 2h)`;
+      } else {
         subtitle.textContent = "Mapa colaborativo en tiempo real";
       }
     }
 
-    const seenIds = new Set();
-    const combined = [];
-    for (const item of [...localReports, ...sheetIncidents, ...baseIncidents]) {
-      const normalizedItem = {
-        ...item,
-        tipo: normalizeIncidentType(item.tipo)
-      };
-      // Clave única por tipo + sector + coordenadas para no duplicar entre servidor local y Google Sheets
-      const dedupeKey = `${normalizeText(normalizedItem.tipo)}|${normalizeText(normalizedItem.sector)}|${Number(normalizedItem.lat).toFixed(4)}|${Number(normalizedItem.lng).toFixed(4)}`;
-      if (!seenIds.has(dedupeKey)) {
-        seenIds.add(dedupeKey);
-        combined.push(normalizedItem);
-      }
-    }
-
-    const newSignature = JSON.stringify(combined.map((i) => i.id)) + "|" + activeFilter;
+    const newSignature = JSON.stringify(combined.map((i) => i.dedupeKey)) + "|" + activeFilter;
     const hadPrevious = lastDataSignature !== "";
     const prevCount = allIncidents.length;
 
@@ -401,7 +422,8 @@ async function fetchGoogleSheetAsJson(urlOrId) {
           mapsUrl: rawMapsUrl || `https://www.google.com/maps?q=${coords.lat},${coords.lng}`,
           lat: coords.lat,
           lng: coords.lng,
-          fecha: item.fecha || item["Marca temporal"] || "En Google Sheets",
+          fecha: item.fecha || item["Marca temporal"] || "",
+          createdAt: item.createdAt || null,
           fuente: "Google Sheets"
         };
       })
@@ -427,13 +449,13 @@ function mapRowCellsToIncident(cells, headers, idx) {
     return null;
   }
 
-  let fecha = "Reciente";
+  let fecha = "";
   let tipoRaw = "";
   let sector = "";
   let mapsUrl = "";
 
   if (cells.length >= 4) {
-    fecha = cells[0] || "Reciente";
+    fecha = cells[0] || "";
     tipoRaw = cells[1] || "Choque";
     sector = cells[2] || "Cartagena";
     mapsUrl = cells[3] || "";
@@ -481,7 +503,7 @@ function parseCsvLine(line) {
 }
 
 // ============================================================================
-// 7. MARCADORES VECTORIALES ESTILO WAZE (ALTO CONTRASTE Y SOMBRAS SUAVES)
+// 8. MARCADORES VECTORIALES ESTILO WAZE + BOTÓN "VÍA DESPEJADA"
 // ============================================================================
 function renderMarkers() {
   markersLayer.clearLayers();
@@ -513,7 +535,8 @@ function renderMarkers() {
     });
 
     const safeSector = escapeHtml(inc.sector);
-    const safeFecha = escapeHtml(inc.fecha || "Hace pocos minutos");
+    const safeFecha = escapeHtml(inc.fecha || "Reciente");
+    const safeExpira = escapeHtml(inc.expiraTexto || "Se borra a las 2h");
     const safeUrl =
       inc.mapsUrl && inc.mapsUrl.startsWith("http")
         ? inc.mapsUrl
@@ -526,9 +549,12 @@ function renderMarkers() {
         </span>
         <div class="popup-title">${safeSector}</div>
         <div class="popup-meta-line">
-          <span>Reportado: ${safeFecha}</span>
+          <span>${safeFecha}</span>
           <span>·</span>
           <span>${Number(inc.lat).toFixed(4)}, ${Number(inc.lng).toFixed(4)}</span>
+        </div>
+        <div class="popup-expiry-pill">
+          ⏱️ ${safeExpira} automáticamente
         </div>
         <a class="popup-maps-btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">
           <span>Abrir ubicación en Google Maps</span>
@@ -538,6 +564,9 @@ function renderMarkers() {
             <line x1="10" y1="14" x2="21" y2="3"/>
           </svg>
         </a>
+        <button type="button" class="popup-resolve-btn" onclick="window.dismissIncident('${escapeHtml(inc.dedupeKey)}', '${escapeHtml(inc.id)}')">
+          ✓ Ya se despejó la vía (Quitar del mapa)
+        </button>
       </div>
     `;
 
@@ -546,6 +575,32 @@ function renderMarkers() {
     markersLayer.addLayer(marker);
   });
 }
+
+window.dismissIncident = async function (dedupeKey, id) {
+  const list = getDismissedKeys();
+  if (dedupeKey && !list.includes(dedupeKey)) list.push(dedupeKey);
+  if (id && !list.includes(id)) list.push(id);
+  localStorage.setItem(STORAGE_KEYS.DISMISSED, JSON.stringify(list));
+
+  // También borrar de localStorage si fue creado localmente
+  const local = getLocalReports().filter((r) => r.id !== id);
+  localStorage.setItem(STORAGE_KEYS.LOCAL_REPORTS, JSON.stringify(local));
+
+  // Si está el servidor local activo, borrarlo también del archivo local
+  try {
+    await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+  } catch {
+    // Ignorar en GitHub Pages
+  }
+
+  lastDataSignature = "";
+  await loadAllData(false);
+  showToast("Incidente marcado como despejado y retirado del mapa");
+};
 
 function getIncidentVisuals(tipo) {
   if (tipo === "Vía cerrada") {
@@ -621,10 +676,9 @@ function updateCounters() {
 }
 
 // ============================================================================
-// 8. INTERACCIONES Y FORMULARIO PASO A PASO
+// 9. INTERACCIONES Y FORMULARIO PASO A PASO
 // ============================================================================
 function initUIEvents() {
-  // Píldoras de filtro por categoría
   document.querySelectorAll(".filter-pill").forEach((pill) => {
     pill.addEventListener("click", () => {
       document.querySelectorAll(".filter-pill").forEach((p) => {
@@ -639,7 +693,6 @@ function initUIEvents() {
     });
   });
 
-  // Salto rápido a corredores de Cartagena
   document.querySelectorAll(".corridor-chip").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".corridor-chip").forEach((b) => b.classList.remove("active"));
@@ -651,11 +704,9 @@ function initUIEvents() {
     });
   });
 
-  // Controles de zoom táctiles
   document.getElementById("btn-zoom-in").addEventListener("click", () => map.zoomIn());
   document.getElementById("btn-zoom-out").addEventListener("click", () => map.zoomOut());
 
-  // Botón sincronizar
   document.getElementById("btn-refresh").addEventListener("click", async () => {
     await syncPendingLocalReportsToServer();
     lastDataSignature = "";
@@ -663,7 +714,6 @@ function initUIEvents() {
     showToast("Mapa sincronizado en tiempo real");
   });
 
-  // Botón centrar en mi ubicación actual
   document.getElementById("btn-locate-me").addEventListener("click", () => {
     if (!navigator.geolocation) {
       showToast("Tu navegador no soporta geolocalización");
@@ -693,7 +743,6 @@ function initUIEvents() {
     );
   });
 
-  // Abrir y cerrar Side-Panel de reporte
   const modalReport = document.getElementById("modal-report");
   document.getElementById("btn-report-incident").addEventListener("click", () => {
     updateExternalFormBanner();
@@ -703,7 +752,6 @@ function initUIEvents() {
     modalReport.classList.add("hidden");
   });
 
-  // Etiquetas rápidas de sector
   document.querySelectorAll(".sector-pill").forEach((pill) => {
     pill.addEventListener("click", () => {
       const sectorInput = document.getElementById("input-sector");
@@ -715,7 +763,6 @@ function initUIEvents() {
   document.getElementById("input-maps-url").addEventListener("input", updateCoordPreview);
   document.getElementById("input-sector").addEventListener("input", updateCoordPreview);
 
-  // Botón principal "Usar mi ubicación actual" con GPS
   document.getElementById("btn-use-gps").addEventListener("click", () => {
     const mapsInput = document.getElementById("input-maps-url");
     if (!navigator.geolocation) {
@@ -744,7 +791,6 @@ function initUIEvents() {
     );
   });
 
-  // Botón "Marcar punto en el mapa"
   document.getElementById("btn-pick-on-map").addEventListener("click", () => {
     modalReport.classList.add("hidden");
     isPickingOnMap = true;
@@ -757,10 +803,8 @@ function initUIEvents() {
     modalReport.classList.remove("hidden");
   });
 
-  // Envío del reporte
   document.getElementById("form-incident").addEventListener("submit", handleReportSubmit);
 
-  // Modal JSON Abierto
   const modalJson = document.getElementById("modal-json");
   document.getElementById("btn-open-json").addEventListener("click", () => {
     document.getElementById("json-viewer").textContent = JSON.stringify(allIncidents, null, 2);
@@ -784,6 +828,7 @@ function initUIEvents() {
   });
   document.getElementById("btn-reset-demo").addEventListener("click", async () => {
     localStorage.removeItem(STORAGE_KEYS.LOCAL_REPORTS);
+    localStorage.removeItem(STORAGE_KEYS.DISMISSED);
     try {
       await fetch("/api/reset", { method: "POST" });
     } catch {
@@ -792,10 +837,9 @@ function initUIEvents() {
     lastDataSignature = "";
     await loadAllData();
     modalJson.classList.add("hidden");
-    showToast("Datos restaurados al estado inicial");
+    showToast("Mapa limpio y sincronizado con Google Sheets");
   });
 
-  // Modal Configuración Google Sheets
   const modalConfig = document.getElementById("modal-config");
   document.getElementById("btn-open-config").addEventListener("click", () => {
     const cfg = getConfig();
@@ -892,15 +936,17 @@ async function handleReportSubmit(e) {
     return;
   }
 
+  const nowMs = Date.now();
   const coords = extractCoordinates(mapsUrl, sector);
   const newIncident = {
-    id: `ctg-${Date.now()}`,
+    id: `ctg-${nowMs}`,
     tipo: normalizeIncidentType(tipo),
     sector,
     mapsUrl,
     lat: coords.lat,
     lng: coords.lng,
-    fecha: "Justo ahora",
+    createdAt: nowMs,
+    fecha: "Hace menos de 1 min",
     fuente: "Colaboración ciudadana"
   };
 
@@ -948,15 +994,24 @@ async function handleReportSubmit(e) {
   await loadAllData(false);
   map.flyTo([newIncident.lat, newIncident.lng], 16, { duration: 0.9 });
 
-  showToast("Reporte publicado en el mapa en tiempo real");
+  showToast("Reporte publicado (se borrará automáticamente en 2 horas)");
 }
 
 // ============================================================================
-// 9. UTILIDADES
+// 10. UTILIDADES
 // ============================================================================
 function getLocalReports() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.LOCAL_REPORTS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getDismissedKeys() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DISMISSED);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
