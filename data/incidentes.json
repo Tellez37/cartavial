@@ -1,5 +1,35 @@
 [
   {
+    "id": "ctg-1794975459897",
+    "tipo": "Choque",
+    "sector": "Consulado",
+    "mapsUrl": "https://www.google.com/maps?q=10.399334,-75.500015",
+    "lat": 10.399334,
+    "lng": -75.500015,
+    "fecha": "Justo ahora",
+    "fuente": "Colaboración ciudadana"
+  },
+  {
+    "id": "ctg-1794975068298",
+    "tipo": "Semáforo dañado",
+    "sector": "Av. Pedro de Heredia - Cuatro Vientos",
+    "mapsUrl": "https://www.google.com/maps?q=10.40904,-75.51642",
+    "lat": 10.40904,
+    "lng": -75.51642,
+    "fecha": "Justo ahora",
+    "fuente": "Colaboración ciudadana"
+  },
+  {
+    "id": "ctg-1794974405006",
+    "tipo": "Vía cerrada",
+    "sector": "Av. Pedro de Heredia - Mercado de Bazurto",
+    "mapsUrl": "https://www.google.com/maps?q=10.415839,-75.527538",
+    "lat": 10.415839,
+    "lng": -75.527538,
+    "fecha": "Justo ahora",
+    "fuente": "Colaboración ciudadana"
+  },
+  {
     "id": "ctg-001",
     "tipo": "Choque",
     "sector": "Av. Pedro de Heredia - Mercado de Bazurto",
@@ -56,6 +86,16 @@
     "mapsUrl": "https://www.google.com/maps?q=10.4225,-75.5441",
     "lat": 10.4225,
     "lng": -75.5441,
+    "fecha": "Hace 1 hora",
+    "fuente": "Reporte ciudadano"
+  },
+  {
+    "id": "ctg-007",
+    "tipo": "Hueco",
+    "sector": "Av. Pedro de Heredia - Sector Villa Olímpica",
+    "mapsUrl": "https://www.google.com/maps?q=10.4038,-75.4968",
+    "lat": 10.4038,
+    "lng": -75.4968,
     "fecha": "Hace 1 hora",
     "fuente": "Reporte ciudadano"
   }

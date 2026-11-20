@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>CartaVial — Inteligencia ciudadana para movernos mejor en Cartagena</title>
-  <meta name="description" content="Mapa interactivo colaborativo de incidentes viales en Cartagena de Indias (choques, vías cerradas y semáforos dañados) basado en datos abiertos." />
-  <meta name="theme-color" content="#0f172a" />
+  <title>CartaVial — Mapa Ciudadano de Tráfico e Incidentes en Cartagena</title>
+  <meta name="description" content="Plataforma colaborativa en tiempo real para reportar tráfico, choques, vías cerradas, huecos y semáforos dañados en Cartagena de Indias." />
+  <meta name="theme-color" content="#ffffff" />
 
-  <!-- Leaflet CSS (OpenStreetMap) -->
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -15,317 +15,461 @@
     crossorigin=""
   />
 
-  <!-- Google Fonts: Inter -->
+  <!-- Tipografía Geométrica: Plus Jakarta Sans + Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
     rel="stylesheet"
   />
 
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
-  <!-- Cabecera compacta pensada para celulares -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand-logo" aria-hidden="true">
-        <span class="pulse-dot"></span>
-        CV
-      </div>
-      <div class="brand-text">
-        <h1>CartaVial <span class="badge-city">Cartagena</span></h1>
-        <p id="status-subtitle">Datos abiertos en tiempo real · Colaboración ciudadana</p>
-      </div>
-    </div>
-
-    <div class="topbar-actions">
-      <button id="btn-refresh" class="icon-btn" title="Actualizar mapa desde la fuente de datos" aria-label="Actualizar mapa">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-          <path d="M3 3v5h5"/>
-          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
-          <path d="M16 16h5v5"/>
-        </svg>
-      </button>
-      <button id="btn-open-json" class="pill-action-btn" title="Ver API / JSON de datos abiertos">
-        <span>{ } JSON</span>
-      </button>
-      <button id="btn-open-config" class="pill-action-btn config-btn" title="Conectar Google Forms y Google Sheets">
-        <span>⚙️ Sheets</span>
-      </button>
-    </div>
-  </header>
-
-  <!-- Barra flotante de filtros por tipo de incidente y corredores clave -->
-  <section class="controls-overlay" aria-label="Filtros del mapa">
-    <div class="filter-chips" role="tablist">
-      <button class="chip active" data-filter="todos" role="tab" aria-selected="true">
-        Todos <span class="chip-count" id="count-todos">0</span>
-      </button>
-      <button class="chip chip-choque" data-filter="Choque" role="tab" aria-selected="false">
-        <span class="dot dot-choque"></span> Choque <span class="chip-count" id="count-choque">0</span>
-      </button>
-      <button class="chip chip-via" data-filter="Vía cerrada" role="tab" aria-selected="false">
-        <span class="dot dot-via"></span> Vía cerrada <span class="chip-count" id="count-via">0</span>
-      </button>
-      <button class="chip chip-semaforo" data-filter="Semáforo dañado" role="tab" aria-selected="false">
-        <span class="dot dot-semaforo"></span> Semáforo dañado <span class="chip-count" id="count-semaforo">0</span>
-      </button>
-    </div>
-
-    <div class="corridor-bar">
-      <span class="corridor-label">Ir a:</span>
-      <button class="corridor-btn" data-lat="10.4055" data-lng="-75.5120" data-zoom="13">Vista General</button>
-      <button class="corridor-btn" data-lat="10.4150" data-lng="-75.5240" data-zoom="15">Av. Pedro de Heredia</button>
-      <button class="corridor-btn" data-lat="10.3548" data-lng="-75.4981" data-zoom="14">Mamonal</button>
-      <button class="corridor-btn" data-lat="10.3912" data-lng="-75.4795" data-zoom="15">El Amparo / Ronda Real</button>
-      <button class="corridor-btn" data-lat="10.4228" data-lng="-75.5455" data-zoom="15">Centro / Getsemaní</button>
-    </div>
-  </section>
-
-  <!-- Banner de selección de punto en el mapa (cuando el usuario elige tocar el mapa) -->
-  <div id="map-pick-banner" class="map-pick-banner hidden">
-    <span>👆 Toca el lugar exacto del incidente en el mapa de Cartagena</span>
-    <button id="btn-cancel-pick" type="button">Cancelar</button>
-  </div>
-
-  <!-- Contenedor principal del mapa OpenStreetMap + Leaflet -->
-  <main class="map-wrapper">
-    <div id="map" role="application" aria-label="Mapa interactivo de incidentes viales en Cartagena"></div>
+  <!-- MAPA HERO A PANTALLA COMPLETA (Estilo Google Maps + Waze) -->
+  <main class="map-stage">
+    <div id="map" role="application" aria-label="Mapa en vivo de movilidad en Cartagena"></div>
   </main>
 
-  <!-- Botón flotante principal del MVP: "Reportar incidente" -->
-  <div class="fab-container">
-    <button id="btn-locate-me" class="fab-secondary" title="Centrar en mi ubicación actual" aria-label="Mi ubicación">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-        <circle cx="12" cy="12" r="7"/>
-      </svg>
-    </button>
+  <!-- CAPA FLOTANTE SUPERIOR: Marca, Corredores y Filtros -->
+  <div class="floating-top-shell">
+    <!-- fila principal: Tarjeta de marca + Acciones de datos -->
+    <div class="floating-header-row">
+      <!-- Tarjeta flotante principal (Brand + Estado en vivo + Buscador de corredor) -->
+      <div class="brand-floating-card">
+        <div class="brand-identity">
+          <div class="brand-mark" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2C7.58 2 4 5.58 4 10C4 16.08 12 22 12 22C12 22 20 16.08 20 10C20 5.58 16.42 2 12 2Z" fill="#FF4438"/>
+              <circle cx="12" cy="10" r="3.5" fill="#FFFFFF"/>
+            </svg>
+          </div>
+          <div class="brand-copy">
+            <div class="brand-title-line">
+              <h1>CartaVial</h1>
+              <span class="live-status-pill">
+                <span class="live-dot"></span>
+                Cartagena
+              </span>
+            </div>
+            <p id="status-subtitle" class="brand-subtitle">Mapa colaborativo en tiempo real</p>
+          </div>
+        </div>
 
-    <button id="btn-report-incident" class="fab-primary">
-      <span class="fab-icon">🚨</span>
-      <span>Reportar incidente</span>
+        <div class="brand-divider"></div>
+
+        <!-- Selector rápido de sectores / corredores viales -->
+        <div class="corridor-QuickJump" aria-label="Sectores principales">
+          <button type="button" class="corridor-chip active" data-lat="10.4055" data-lng="-75.5120" data-zoom="13">
+            Todo Cartagena
+          </button>
+          <button type="button" class="corridor-chip" data-lat="10.4142" data-lng="-75.5225" data-zoom="15">
+            Av. Pedro de Heredia
+          </button>
+          <button type="button" class="corridor-chip" data-lat="10.3548" data-lng="-75.4981" data-zoom="14">
+            Mamonal
+          </button>
+          <button type="button" class="corridor-chip" data-lat="10.3912" data-lng="-75.4795" data-zoom="15">
+            El Amparo
+          </button>
+          <button type="button" class="corridor-chip" data-lat="10.4228" data-lng="-75.5455" data-zoom="15">
+            Centro
+          </button>
+        </div>
+      </div>
+
+      <!-- Botones de utilidad flotantes a la derecha -->
+      <div class="utility-floating-group">
+        <button id="btn-refresh" class="tactile-icon-btn" title="Sincronizar mapa ahora" aria-label="Sincronizar mapa">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+            <path d="M16 16h5v5"/>
+          </svg>
+        </button>
+
+        <button id="btn-open-json" class="tactile-action-btn" title="Ver API de Datos Abiertos (JSON)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+          <span>Datos JSON</span>
+        </button>
+
+        <button id="btn-open-config" class="tactile-action-btn" title="Conectar Google Sheets y Google Forms">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <line x1="3" y1="9" x2="21" y2="9"/>
+            <line x1="9" y1="21" x2="9" y2="9"/>
+          </svg>
+          <span>Google Sheets</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Fila de filtros flotantes estilo Waze / Google Maps -->
+    <div class="filter-floating-strip" role="tablist" aria-label="Filtrar incidentes por categoría">
+      <button type="button" class="filter-pill active" data-filter="todos" role="tab" aria-selected="true">
+        <span>Todos</span>
+        <span class="filter-count" id="count-todos">0</span>
+      </button>
+
+      <button type="button" class="filter-pill" data-filter="Choque" role="tab" aria-selected="false">
+        <span class="filter-swatch swatch-choque"></span>
+        <span>Choques</span>
+        <span class="filter-count" id="count-choque">0</span>
+      </button>
+
+      <button type="button" class="filter-pill" data-filter="Vía cerrada" role="tab" aria-selected="false">
+        <span class="filter-swatch swatch-via"></span>
+        <span>Vía cerrada / Trancón</span>
+        <span class="filter-count" id="count-via">0</span>
+      </button>
+
+      <button type="button" class="filter-pill" data-filter="Semáforo dañado" role="tab" aria-selected="false">
+        <span class="filter-swatch swatch-semaforo"></span>
+        <span>Semáforos</span>
+        <span class="filter-count" id="count-semaforo">0</span>
+      </button>
+
+      <button type="button" class="filter-pill" data-filter="Hueco" role="tab" aria-selected="false">
+        <span class="filter-swatch swatch-hueco"></span>
+        <span>Huecos / Daño vial</span>
+        <span class="filter-count" id="count-hueco">0</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- BANNER DE SELECCIÓN INTERACTIVA SOBRE EL MAPA -->
+  <div id="map-pick-banner" class="map-pick-floating hidden">
+    <div class="pick-banner-text">
+      <span class="pick-pulse-icon"></span>
+      <span>Toca sobre la calle exacta donde ocurre el incidente</span>
+    </div>
+    <button id="btn-cancel-pick" type="button" class="pick-cancel-btn">Cancelar</button>
+  </div>
+
+  <!-- CONTROLES FLOTANTES DE MAPA E INTERACCIÓN (Zona inferior para pulgares) -->
+  <div class="floating-bottom-dock">
+    <!-- Controles de navegación del mapa (Ubicación GPS y Zoom táctil) -->
+    <div class="map-nav-controls">
+      <button id="btn-locate-me" class="nav-control-btn" title="Centrar en mi ubicación actual" aria-label="Mi ubicación actual">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+          <circle cx="12" cy="12" r="7"/>
+        </svg>
+      </button>
+      <div class="zoom-stack">
+        <button id="btn-zoom-in" class="nav-control-btn zoom-top" title="Acercar mapa" aria-label="Acercar">+</button>
+        <button id="btn-zoom-out" class="nav-control-btn zoom-bottom" title="Alejar mapa" aria-label="Alejar">&minus;</button>
+      </div>
+    </div>
+
+    <!-- CALL TO ACTION PRINCIPAL: Reportar daño o incidente -->
+    <button id="btn-report-incident" class="cta-report-btn">
+      <span class="cta-icon-badge" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </span>
+      <span class="cta-label-group">
+        <span class="cta-main-label">Reportar daño o incidente</span>
+        <span class="cta-sub-label">Colaboración ciudadana · 3 pasos</span>
+      </span>
     </button>
   </div>
 
-  <!-- MODAL 1: Formulario ultrarrápido de 3 preguntas (MVP) -->
-  <div id="modal-report" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-report-title">
-    <div class="modal-sheet">
-      <div class="sheet-handle"></div>
-      <div class="modal-header">
+  <!-- PANEL FLOTANTE / SIDE-PANEL DE REPORTE ("Reportar daño o incidente") -->
+  <div id="modal-report" class="panel-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-report-title">
+    <aside class="floating-side-panel">
+      <div class="mobile-drag-handle"></div>
+
+      <div class="panel-header">
         <div>
-          <span class="modal-tag">Colaboración Ciudadana · 3 Pasos</span>
-          <h2 id="modal-report-title">Reportar incidente vial</h2>
+          <span class="panel-eyebrow">Reporte en tiempo real</span>
+          <h2 id="modal-report-title">Reportar daño o incidente</h2>
+          <p class="panel-subtitle">Alerta a otros ciudadanos en Cartagena para evitar trancones y accidentes.</p>
         </div>
-        <button id="btn-close-report" class="close-btn" aria-label="Cerrar formulario">&times;</button>
+        <button id="btn-close-report" class="panel-close-btn" aria-label="Cerrar panel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
 
-      <p class="modal-desc">
-        Tu reporte actualiza el mapa público de Cartagena para que conductores de Transcaribe, motos, busetas y peatones tomen desvíos a tiempo.
-      </p>
-
-      <!-- Opción para abrir el Google Form original en una pestaña si ya está configurado -->
-      <div id="external-form-banner" class="external-form-banner hidden">
-        <span>¿Prefieres llenar el formulario directo en Google Forms?</span>
-        <a id="link-external-google-form" href="#" target="_blank" rel="noopener noreferrer">Abrir Google Form ↗</a>
+      <!-- Enlace opcional a Google Forms externo si está configurado -->
+      <div id="external-form-banner" class="external-form-card hidden">
+        <span>¿Prefieres enviar desde Google Forms?</span>
+        <a id="link-external-google-form" href="#" target="_blank" rel="noopener noreferrer">Abrir formulario ↗</a>
       </div>
 
-      <form id="form-incident" autocomplete="off">
-        <!-- Pregunta 1: Tipo de problema -->
-        <div class="form-group">
-          <label class="form-label">1. Tipo de problema <span class="req">*</span></label>
-          <div class="incident-type-grid">
-            <label class="type-card">
+      <form id="form-incident" class="report-form" autocomplete="off">
+        <!-- PASO 1: Selección táctil con tarjetas de iconos -->
+        <div class="step-section">
+          <div class="step-header">
+            <span class="step-badge">Paso 1</span>
+            <label class="step-title">¿Qué problema ves en la vía?</label>
+          </div>
+
+          <div class="category-card-grid">
+            <!-- Tarjeta 1: Choque / Accidente -->
+            <label class="category-card">
               <input type="radio" name="tipo" value="Choque" required checked />
-              <span class="type-card-body">
-                <span class="type-emoji">💥</span>
-                <span class="type-name">Choque</span>
-                <span class="type-sub">Colisión o accidente</span>
-              </span>
+              <div class="category-card-surface">
+                <div class="category-icon-box icon-choque">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/>
+                    <circle cx="7" cy="17" r="2"/>
+                    <path d="M9 17h6"/>
+                    <circle cx="17" cy="17" r="2"/>
+                    <path d="M14 3l1.5 3L19 5l-2 2.5"/>
+                  </svg>
+                </div>
+                <span class="category-title">Choque</span>
+                <span class="category-caption">Colisión o accidente</span>
+              </div>
             </label>
 
-            <label class="type-card">
+            <!-- Tarjeta 2: Vía cerrada / Tráfico -->
+            <label class="category-card">
               <input type="radio" name="tipo" value="Vía cerrada" />
-              <span class="type-card-body">
-                <span class="type-emoji">🚧</span>
-                <span class="type-name">Vía cerrada</span>
-                <span class="type-sub">Obra, bloqueo o desvío</span>
-              </span>
+              <div class="category-card-surface">
+                <div class="category-icon-box icon-via">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="6" width="18" height="6" rx="1.5"/>
+                    <path d="M6 12v7M18 12v7M4 19h4M16 19h4"/>
+                    <path d="M7 6l3 6M14 6l3 6"/>
+                  </svg>
+                </div>
+                <span class="category-title">Vía cerrada</span>
+                <span class="category-caption">Bloqueo, obra o trancón</span>
+              </div>
             </label>
 
-            <label class="type-card">
+            <!-- Tarjeta 3: Semáforo dañado -->
+            <label class="category-card">
               <input type="radio" name="tipo" value="Semáforo dañado" />
-              <span class="type-card-body">
-                <span class="type-emoji">🚦</span>
-                <span class="type-name">Semáforo dañado</span>
-                <span class="type-sub">Apagado o intermitente</span>
-              </span>
+              <div class="category-card-surface">
+                <div class="category-icon-box icon-semaforo">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="7" y="2" width="10" height="20" rx="3"/>
+                    <circle cx="12" cy="7" r="1.6"/>
+                    <circle cx="12" cy="12" r="1.6"/>
+                    <circle cx="12" cy="17" r="1.6"/>
+                    <path d="M4 6h3M17 6h3M4 12h3M17 12h3"/>
+                  </svg>
+                </div>
+                <span class="category-title">Semáforo dañado</span>
+                <span class="category-caption">Apagado o intermitente</span>
+              </div>
+            </label>
+
+            <!-- Tarjeta 4: Hueco / Daño vial -->
+            <label class="category-card">
+              <input type="radio" name="tipo" value="Hueco" />
+              <div class="category-card-surface">
+                <div class="category-icon-box icon-hueco">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 17l3-9h12l3 9"/>
+                    <path d="M7 17c1.5-2 3-2.5 5-1s3.5 1 5-1"/>
+                    <ellipse cx="12" cy="18" rx="7" ry="2.5"/>
+                  </svg>
+                </div>
+                <span class="category-title">Hueco o daño</span>
+                <span class="category-caption">Hundimiento o alcantarilla</span>
+              </div>
             </label>
           </div>
         </div>
 
-        <!-- Pregunta 2: Barrio / Sector -->
-        <div class="form-group">
-          <label class="form-label" for="input-sector">2. Barrio o sector <span class="req">*</span></label>
-          <input
-            type="text"
-            id="input-sector"
-            name="sector"
-            list="sectores-cartagena"
-            placeholder="Ej: Av. Pedro de Heredia - Bazurto, Mamonal Km 4..."
-            required
-          />
+        <!-- PASO 2: Ubicación rápida con GPS o selección táctil -->
+        <div class="step-section">
+          <div class="step-header">
+            <span class="step-badge">Paso 2</span>
+            <label class="step-title" for="input-maps-url">Ubicación del incidente</label>
+          </div>
+
+          <button type="button" id="btn-use-gps" class="gps-primary-btn">
+            <span class="gps-btn-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+                <circle cx="12" cy="12" r="7"/>
+              </svg>
+            </span>
+            <span>Usar mi ubicación actual</span>
+          </button>
+
+          <div class="location-secondary-row">
+            <button type="button" id="btn-pick-on-map" class="secondary-tactile-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              <span>Marcar punto en el mapa</span>
+            </button>
+          </div>
+
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="input-maps-url"
+              name="mapsUrl"
+              placeholder="O pega aquí el enlace de ubicación de Google Maps..."
+              required
+            />
+          </div>
+
+          <div id="coord-preview" class="coord-status-box">
+            Toca "Usar mi ubicación actual", marca el punto en el mapa o pega un link de Google Maps.
+          </div>
+        </div>
+
+        <!-- PASO 3: Barrio / Sector de referencia -->
+        <div class="step-section">
+          <div class="step-header">
+            <span class="step-badge">Paso 3</span>
+            <label class="step-title" for="input-sector">Barrio, vía o punto de referencia</label>
+          </div>
+
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="input-sector"
+              name="sector"
+              list="sectores-cartagena"
+              placeholder="Ej: Av. Pedro de Heredia frente a Bazurto"
+              required
+            />
+          </div>
+
           <datalist id="sectores-cartagena">
             <option value="Av. Pedro de Heredia - Mercado de Bazurto"></option>
             <option value="Av. Pedro de Heredia - Pie de la Popa"></option>
             <option value="Av. Pedro de Heredia - Cuatro Vientos"></option>
             <option value="Av. Pedro de Heredia - María Auxiliadora"></option>
-            <option value="Av. Pedro de Heredia - Villa Olímpica / Ejecutivos"></option>
+            <option value="Av. Pedro de Heredia - Ejecutivos"></option>
             <option value="Bomba El Amparo - Ronda Real"></option>
             <option value="Vía Mamonal - Zona Industrial"></option>
-            <option value="Vía Mamonal - Puerta de Hierro / Ceballos"></option>
+            <option value="Vía Mamonal - Ceballos / Puerta de Hierro"></option>
             <option value="Av. Crisanto Luque - El Bosque"></option>
-            <option value="Centro Histórico - Torre del Reloj / Matuna"></option>
-            <option value="Getsemaní - Calle Media Luna / Puente Román"></option>
+            <option value="Centro Histórico - Torre del Reloj"></option>
+            <option value="Getsemaní - Calle Media Luna"></option>
             <option value="Bocagrande - Av. San Martín"></option>
-            <option value="Crespo - Vía al Mar / Túnel"></option>
-            <option value="Torices - Paseo de Bolívar"></option>
-            <option value="Transversal 54 - El Country / Los Corales"></option>
-            <option value="La Castellana / Los Alpes"></option>
-            <option value="El Pozón - La Cordialidad"></option>
+            <option value="Crespo - Vía al Mar"></option>
           </datalist>
-          <div class="quick-sector-pills">
+
+          <div class="sector-quick-tags">
             <button type="button" class="sector-pill" data-sector="Av. Pedro de Heredia - Bazurto">Pedro de Heredia</button>
-            <button type="button" class="sector-pill" data-sector="Vía Mamonal - Ceballos">Mamonal</button>
+            <button type="button" class="sector-pill" data-sector="Vía Mamonal - Ceballos">Vía Mamonal</button>
             <button type="button" class="sector-pill" data-sector="Bomba El Amparo">El Amparo</button>
             <button type="button" class="sector-pill" data-sector="Pie de la Popa">Pie de la Popa</button>
             <button type="button" class="sector-pill" data-sector="El Bosque - Crisanto Luque">El Bosque</button>
           </div>
         </div>
 
-        <!-- Pregunta 3: Enlace de ubicación de Google Maps -->
-        <div class="form-group">
-          <label class="form-label" for="input-maps-url">3. Enlace de ubicación de Google Maps <span class="req">*</span></label>
-          <input
-            type="text"
-            id="input-maps-url"
-            name="mapsUrl"
-            placeholder="https://www.google.com/maps?q=10.405,-75.512 o pega tu link"
-            required
-          />
-          <div class="location-helpers">
-            <button type="button" id="btn-use-gps" class="helper-btn">
-              📍 Generar link con mi GPS
-            </button>
-            <button type="button" id="btn-pick-on-map" class="helper-btn">
-              🗺️ Elegir punto en el mapa
-            </button>
+        <button type="submit" id="btn-submit-report" class="submit-primary-btn">
+          <span>Publicar reporte en el mapa</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/>
+            <polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </button>
+      </form>
+    </aside>
+  </div>
+
+  <!-- MODAL: Visor de API de Datos Abiertos (JSON) -->
+  <div id="modal-json" class="panel-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-json-title">
+    <div class="floating-dialog-card">
+      <div class="mobile-drag-handle"></div>
+      <div class="panel-header">
+        <div>
+          <span class="panel-eyebrow">API Ciudadana · Datos Abiertos</span>
+          <h2 id="modal-json-title">Dataset Público en JSON</h2>
+          <p class="panel-subtitle">
+            Los reportes ciudadanos se estructuran como un bien común abierto para Cartagena.
+          </p>
+        </div>
+        <button id="btn-close-json" class="panel-close-btn" aria-label="Cerrar ventana">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="dialog-action-bar">
+        <button id="btn-copy-json" class="secondary-tactile-btn">Copiar JSON</button>
+        <button id="btn-download-json" class="secondary-tactile-btn">Descargar archivo .json</button>
+        <button id="btn-reset-demo" class="secondary-tactile-btn btn-danger-soft">Restaurar datos base</button>
+      </div>
+
+      <pre id="json-viewer" class="code-preview-box"></pre>
+    </div>
+  </div>
+
+  <!-- MODAL: Configuración de Google Sheets y Google Forms -->
+  <div id="modal-config" class="panel-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-config-title">
+    <div class="floating-dialog-card">
+      <div class="mobile-drag-handle"></div>
+      <div class="panel-header">
+        <div>
+          <span class="panel-eyebrow">Integración en la nube</span>
+          <h2 id="modal-config-title">Conectar Google Sheets y Forms</h2>
+          <p class="panel-subtitle">
+            Conecta tu hoja de cálculo pública de Google Sheets para usarla como base de datos ligera.
+          </p>
+        </div>
+        <button id="btn-close-config" class="panel-close-btn" aria-label="Cerrar configuración">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <form id="form-config" class="report-form">
+        <div class="step-section">
+          <label class="step-title" for="input-sheet-url">Enlace o ID de tu Google Sheet público</label>
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="input-sheet-url"
+              placeholder="https://docs.google.com/spreadsheets/d/TU_ID_AQUI/edit?usp=sharing"
+            />
           </div>
-          <small id="coord-preview" class="form-hint">
-            Puedes pegar un link de Google Maps, usar tu GPS en 1 toque o tocar el punto en el mapa.
-          </small>
+          <p class="field-helper-text">
+            En Google Sheets ve a <strong>Compartir → Cualquier persona con el enlace (Lector)</strong> y pega el link aquí.
+          </p>
         </div>
 
-        <div class="form-actions">
-          <button type="submit" id="btn-submit-report" class="submit-btn">
-            Publicar incidente en el mapa
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- MODAL 2: Visor de API de Datos Abiertos (JSON) -->
-  <div id="modal-json" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-json-title">
-    <div class="modal-sheet modal-wide">
-      <div class="sheet-handle"></div>
-      <div class="modal-header">
-        <div>
-          <span class="modal-tag">Bien Común · Datos Abiertos</span>
-          <h2 id="modal-json-title">JSON Público de Movilidad (CartaVial)</h2>
-        </div>
-        <button id="btn-close-json" class="close-btn" aria-label="Cerrar visor JSON">&times;</button>
-      </div>
-      <p class="modal-desc">
-        A diferencia de las plataformas privadas que monopolizan la ubicación, CartaVial expone los reportes ciudadanos como datos abiertos reutilizables en formato JSON.
-      </p>
-      <div class="json-toolbar">
-        <button id="btn-copy-json" class="helper-btn">📋 Copiar JSON</button>
-        <button id="btn-download-json" class="helper-btn">⬇️ Descargar incidentes.json</button>
-        <button id="btn-reset-demo" class="helper-btn danger-btn">🔄 Restaurar datos iniciales</button>
-      </div>
-      <pre id="json-viewer" class="json-code"></pre>
-    </div>
-  </div>
-
-  <!-- MODAL 3: Configuración de Google Sheets y Google Forms -->
-  <div id="modal-config" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-config-title">
-    <div class="modal-sheet modal-wide">
-      <div class="sheet-handle"></div>
-      <div class="modal-header">
-        <div>
-          <span class="modal-tag">Integración Cloud · Sin servidores costosos</span>
-          <h2 id="modal-config-title">Conectar Google Sheets y Google Forms</h2>
-        </div>
-        <button id="btn-close-config" class="close-btn" aria-label="Cerrar configuración">&times;</button>
-      </div>
-
-      <p class="modal-desc">
-        CartaVial ya funciona de inmediato con la base de datos local/demo. Para conectarlo en vivo a tu hoja de cálculo de Google Sheets, pega el link de tu hoja pública aquí:
-      </p>
-
-      <form id="form-config">
-        <div class="form-group">
-          <label class="form-label" for="input-sheet-url">
-            1. Link o ID de tu Google Sheet (Base de datos pública)
-          </label>
-          <input
-            type="text"
-            id="input-sheet-url"
-            placeholder="https://docs.google.com/spreadsheets/d/TU_ID_AQUI/edit?usp=sharing"
-          />
-          <small class="form-hint">
-            En Google Sheets haz clic en <strong>Compartir → Cualquier persona con el enlace (Lector)</strong> o <strong>Archivo → Compartir → Publicar en la web</strong> y pega el link arriba. CartaVial lo transforma automáticamente a JSON mediante el endpoint público <code>/gviz/tq?tqx=out:json</code>.
-          </small>
+        <div class="step-section">
+          <label class="step-title" for="input-form-url">Enlace de tu Google Form o Apps Script (Opcional)</label>
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="input-form-url"
+              placeholder="https://docs.google.com/forms/d/e/.../viewform"
+            />
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="input-form-url">
-            2. Link de tu Google Form o Apps Script (Opcional)
-          </label>
-          <input
-            type="text"
-            id="input-form-url"
-            placeholder="https://docs.google.com/forms/d/e/.../viewform"
-          />
-          <small class="form-hint">
-            Si pegas el link de tu Google Form, los usuarios tendrán un enlace directo para abrirlo, o si pegas la URL de un Web App de Google Apps Script se guardará automáticamente cada reporte en tu Google Sheet.
-          </small>
-        </div>
-
-        <div class="config-steps-box">
-          <strong>Columnas esperadas en tu Google Form / Google Sheet:</strong>
-          <ol>
-            <li><strong>Marca temporal</strong> (la crea Google Forms automáticamente)</li>
-            <li><strong>Tipo de problema</strong> (Choque, Vía cerrada, Semáforo dañado)</li>
-            <li><strong>Barrio o sector</strong> (Texto libre, ej. Av. Pedro de Heredia)</li>
-            <li><strong>Enlace de ubicación de Google Maps</strong> (Link de Google Maps)</li>
-          </ol>
-        </div>
-
-        <div class="form-actions config-actions">
-          <button type="button" id="btn-test-sheet" class="helper-btn">🔍 Probar lectura JSON</button>
-          <button type="submit" class="submit-btn">Guardar conexión</button>
+        <div class="dialog-footer-row">
+          <button type="button" id="btn-test-sheet" class="secondary-tactile-btn">Probar conexión</button>
+          <button type="submit" class="submit-primary-btn">Guardar conexión</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- Toast de notificación rápida -->
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <!-- Notificación Toast Flotante -->
+  <div id="toast" class="floating-toast hidden" role="status" aria-live="polite"></div>
 
   <!-- Leaflet JS -->
   <script
@@ -334,7 +478,7 @@
     crossorigin=""
   ></script>
 
-  <!-- Lógica principal de CartaVial -->
-  <script src="app.js"></script>
+  <!-- Lógica de aplicación -->
+  <script src="app.js?v=6"></script>
 </body>
 </html>

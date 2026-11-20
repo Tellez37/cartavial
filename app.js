@@ -1,28 +1,23 @@
 /**
  * CartaVial — Inteligencia ciudadana para movernos mejor en Cartagena
- * MVP: OpenStreetMap + Leaflet + Google Forms + Google Sheets (JSON público)
+ * Rediseño UX/UI Senior: Estética Google Maps + Waze · Datos Abiertos
  */
 
 // ============================================================================
-// 1. CONFIGURACIÓN PRINCIPAL (Puedes pegar aquí tus links antes de subir a GitHub Pages)
+// 1. CONFIGURACIÓN PRINCIPAL (Conectada en vivo a tu Google Sheet via Apps Script)
 // ============================================================================
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbx2Sa3SOtSfz-LEPmpvkisuk56VfP-pSRnJ1nErVOGkMcb8RRoz_fBT09XRSATDnTaW/exec";
+
 const DEFAULT_CONFIG = {
-  // Pega aquí el link o ID de tu Google Sheet público cuando lo crees:
-  // Ejemplo: "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit"
-  googleSheetUrl: "",
-
-  // Pega aquí el link de tu Google Form (o Web App de Google Apps Script):
-  // Ejemplo: "https://docs.google.com/forms/d/e/1FAIpQLSe.../viewform"
-  googleFormUrl: "",
-
-  // Coordenadas centrales de Cartagena de Indias
+  googleSheetUrl: APPS_SCRIPT_URL,
+  googleFormUrl: APPS_SCRIPT_URL,
   cartagenaCenter: [10.4025, -75.5140],
   defaultZoom: 13
 };
 
 // ============================================================================
 // 2. DICCIONARIO GEORREFERENCIADO DE SECTORES Y VÍAS DE CARTAGENA
-// Respaldo inteligente cuando un usuario pega un link acortado (maps.app.goo.gl)
 // ============================================================================
 const SECTORES_CARTAGENA = [
   { keywords: ["bazurto", "mercado"], lat: 10.4136, lng: -75.5219 },
@@ -43,11 +38,10 @@ const SECTORES_CARTAGENA = [
   { keywords: ["torices", "paseo de bolivar", "paseo de bolívar", "santa rita"], lat: 10.4315, lng: -75.5318 },
   { keywords: ["transversal 54", "country", "corales", "blas de lezo", "caracoles"], lat: 10.3865, lng: -75.4932 },
   { keywords: ["pozon", "pozón", "cordialidad", "terminal"], lat: 10.4018, lng: -75.4485 },
-  { keywords: ["terwengel", "ternera", "san jose", "san josé", "universidad"], lat: 10.3812, lng: -75.4685 },
+  { keywords: ["ternera", "san jose", "san josé", "universidad"], lat: 10.3812, lng: -75.4685 },
   { keywords: ["pedro de heredia"], lat: 10.4095, lng: -75.5105 }
 ];
 
-// Datos semilla de Cartagena por si se abre directamente sin servidor local (file://)
 const FALLBACK_INCIDENTS = [
   {
     id: "ctg-001",
@@ -108,15 +102,25 @@ const FALLBACK_INCIDENTS = [
     lng: -75.5441,
     fecha: "Hace 1 hora",
     fuente: "Reporte ciudadano"
+  },
+  {
+    id: "ctg-007",
+    tipo: "Hueco",
+    sector: "Av. Pedro de Heredia - Sector Cuatro Vientos (Carril Mixto)",
+    mapsUrl: "https://www.google.com/maps?q=10.4079,-75.5061",
+    lat: 10.4079,
+    lng: -75.5061,
+    fecha: "Hace 1 hora",
+    fuente: "Reporte ciudadano"
   }
 ];
 
 // ============================================================================
-// 3. ESTADO DE LA APLICACIÓN
+// 3. ESTADO GLOBAL
 // ============================================================================
 const STORAGE_KEYS = {
-  LOCAL_REPORTS: "cartavial_reportes_locales_v1",
-  CONFIG: "cartavial_config_v1"
+  LOCAL_REPORTS: "cartavial_reportes_locales_v2",
+  CONFIG: "cartavial_config_v2"
 };
 
 let map;
@@ -125,40 +129,39 @@ let allIncidents = [];
 let activeFilter = "todos";
 let isPickingOnMap = false;
 let tempPickMarker = null;
+let lastDataSignature = "";
 
 // ============================================================================
-// 4. INICIALIZACIÓN DEL MAPA (OpenStreetMap + Leaflet)
+// 4. INICIALIZACIÓN DEL MAPA (Estética Limpia estilo Google Maps)
 // ============================================================================
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   initMap();
   initUIEvents();
-  loadAllData();
+  await syncPendingLocalReportsToServer();
+  await loadAllData();
 
-  // Auto-refrescar cada 45 segundos si hay un Google Sheet conectado
+  // Sincronización automática en tiempo real cada 3.5 segundos
   setInterval(() => {
-    const cfg = getConfig();
-    if (cfg.googleSheetUrl) {
-      loadAllData(true);
-    }
-  }, 45000);
+    loadAllData(true);
+  }, 3500);
 });
 
 function initMap() {
   map = L.map("map", {
     center: DEFAULT_CONFIG.cartagenaCenter,
     zoom: DEFAULT_CONFIG.defaultZoom,
-    zoomControl: true
+    zoomControl: false
   });
 
-  // Capa base OpenStreetMap con estilo claro y legible para vías urbanas
+  // Servidor oficial y 100% gratuito de OpenStreetMap (sin API Keys) estilizado vía CSS
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
+    className: "osm-google-clean-tiles",
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · CartaVial Cartagena'
   }).addTo(map);
 
   markersLayer = L.layerGroup().addTo(map);
 
-  // Evento cuando el usuario elige tocar en el mapa para obtener ubicación
   map.on("click", (e) => {
     if (!isPickingOnMap) return;
     const lat = Number(e.latlng.lat.toFixed(6));
@@ -168,48 +171,41 @@ function initMap() {
 }
 
 // ============================================================================
-// 5. EXTRACCIÓN DE COORDENADAS DESDE LINKS DE GOOGLE MAPS O BARRIO
+// 5. EXTRACCIÓN DE COORDENADAS DESDE LINKS DE GOOGLE MAPS O SECTOR
 // ============================================================================
 function extractCoordinates(mapsUrl, sectorText = "") {
   const raw = String(mapsUrl || "").trim();
 
-  // 1) Patrón @lat,lng (ej: /@10.4136,-75.5219,17z)
   const atMatch = raw.match(/@(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
   if (atMatch) {
-    return { lat: parseFloat(atMatch[1]), lng: parseFloat(atMatch[2]), metodo: "URL Google Maps (@)" };
+    return { lat: parseFloat(atMatch[1]), lng: parseFloat(atMatch[2]), metodo: "Coordenadas exactas de Google Maps" };
   }
 
-  // 2) Patrón ?q=lat,lng o &ll=lat,lng o query=lat,lng
   const queryMatch = raw.match(/(?:q|ll|query|center)=(-?\d+\.\d+)\s*(?:,|%2C)\s*(-?\d+\.\d+)/i);
   if (queryMatch) {
-    return { lat: parseFloat(queryMatch[1]), lng: parseFloat(queryMatch[2]), metodo: "URL Google Maps (?q=)" };
+    return { lat: parseFloat(queryMatch[1]), lng: parseFloat(queryMatch[2]), metodo: "Coordenadas exactas de ubicación" };
   }
 
-  // 3) Patrón !3dlat!4dlng de Google Maps
   const bangMatch = raw.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (bangMatch) {
-    return { lat: parseFloat(bangMatch[1]), lng: parseFloat(bangMatch[2]), metodo: "URL Google Maps (!3d!4d)" };
+    return { lat: parseFloat(bangMatch[1]), lng: parseFloat(bangMatch[2]), metodo: "Coordenadas exactas de Google Maps" };
   }
 
-  // 4) Coordenadas directas en cualquier parte del texto (rango cercano a Colombia/Cartagena)
   const pairMatch = raw.match(/(10\.\d{3,8})\s*,\s*(-75\.\d{3,8})/);
   if (pairMatch) {
-    return { lat: parseFloat(pairMatch[1]), lng: parseFloat(pairMatch[2]), metodo: "Coordenadas en link" };
+    return { lat: parseFloat(pairMatch[1]), lng: parseFloat(pairMatch[2]), metodo: "Coordenadas en Cartagena" };
   }
 
-  // Par genérico lat,lng
   const genericPair = raw.match(/(-?\d{1,2}\.\d{3,8})\s*,\s*(-?\d{2}\.\d{3,8})/);
   if (genericPair) {
     return { lat: parseFloat(genericPair[1]), lng: parseFloat(genericPair[2]), metodo: "Coordenadas directas" };
   }
 
-  // 5) Respaldo por barrio/sector de Cartagena (para links acortados maps.app.goo.gl)
   const normalizedSector = normalizeText(sectorText + " " + raw);
   for (const item of SECTORES_CARTAGENA) {
     if (item.keywords.some((kw) => normalizedSector.includes(normalizeText(kw)))) {
-      // Pequeña variación aleatoria (~80m) para que varios reportes del mismo barrio no queden uno encima del otro
-      const jitterLat = (Math.random() - 0.5) * 0.0014;
-      const jitterLng = (Math.random() - 0.5) * 0.0014;
+      const jitterLat = (Math.random() - 0.5) * 0.0012;
+      const jitterLng = (Math.random() - 0.5) * 0.0012;
       return {
         lat: Number((item.lat + jitterLat).toFixed(6)),
         lng: Number((item.lng + jitterLng).toFixed(6)),
@@ -218,10 +214,9 @@ function extractCoordinates(mapsUrl, sectorText = "") {
     }
   }
 
-  // 6) Respaldo final en corredor central Av. Pedro de Heredia
   return {
-    lat: Number((10.4085 + (Math.random() - 0.5) * 0.004).toFixed(6)),
-    lng: Number((-75.5125 + (Math.random() - 0.5) * 0.004).toFixed(6)),
+    lat: Number((10.4085 + (Math.random() - 0.5) * 0.003).toFixed(6)),
+    lng: Number((-75.5125 + (Math.random() - 0.5) * 0.003).toFixed(6)),
     metodo: "Ubicación aproximada en Cartagena"
   };
 }
@@ -235,30 +230,48 @@ function normalizeText(str) {
 
 function normalizeIncidentType(rawType) {
   const t = normalizeText(rawType);
-  if (t.includes("choque") || t.includes("accidente") || t.includes("colision")) {
-    return "Choque";
+  if (t.includes("hueco") || t.includes("dano") || t.includes("alcantarilla") || t.includes("hundimiento")) {
+    return "Hueco";
   }
-  if (t.includes("cerrada") || t.includes("cierre") || t.includes("bloqueo") || t.includes("obra")) {
+  if (t.includes("cerrada") || t.includes("cierre") || t.includes("bloqueo") || t.includes("obra") || t.includes("trancon") || t.includes("trafico")) {
     return "Vía cerrada";
   }
-  if (t.includes("semaforo") || t.includes("dañado") || t.includes("apagado")) {
+  if (t.includes("semaforo") || t.includes("sem") || t.includes("apagado") || t.includes("intermitente")) {
     return "Semáforo dañado";
   }
   return "Choque";
 }
 
 // ============================================================================
-// 6. LECTURA DE DATOS ABIERTOS (JSON LOCAL + GOOGLE SHEETS EN VIVO)
+// 6. SINCRONIZACIÓN Y LECTURA DE DATOS ABIERTOS (SERVIDOR + GOOGLE SHEETS)
 // ============================================================================
-async function loadAllData(silent = false) {
-  const refreshBtn = document.getElementById("btn-refresh");
-  if (refreshBtn) refreshBtn.classList.add("spinning");
+async function syncPendingLocalReportsToServer() {
+  const localReports = getLocalReports();
+  if (localReports.length === 0) return;
 
   try {
-    // 1. Cargar datos base (archivo JSON o semilla)
+    for (const item of [...localReports].reverse()) {
+      const res = await fetch("/api/incidentes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item)
+      });
+      if (!res.ok) return;
+    }
+    localStorage.removeItem(STORAGE_KEYS.LOCAL_REPORTS);
+  } catch {
+    // Mantiene respaldo local si no hay servidor con API
+  }
+}
+
+async function loadAllData(silent = false) {
+  const refreshBtn = document.getElementById("btn-refresh");
+  if (refreshBtn && !silent) refreshBtn.classList.add("spinning");
+
+  try {
     let baseIncidents = [];
     try {
-      const res = await fetch("data/incidentes.json", { cache: "no-store" });
+      const res = await fetch(`data/incidentes.json?t=${Date.now()}`, { cache: "no-store" });
       if (res.ok) {
         baseIncidents = await res.json();
       } else {
@@ -268,10 +281,7 @@ async function loadAllData(silent = false) {
       baseIncidents = [...FALLBACK_INCIDENTS];
     }
 
-    // 2. Cargar reportes creados desde el navegador del usuario
     const localReports = getLocalReports();
-
-    // 3. Si hay un Google Sheet configurado, leer sus filas como JSON en tiempo real
     const cfg = getConfig();
     let sheetIncidents = [];
     const configBtn = document.getElementById("btn-open-config");
@@ -282,44 +292,60 @@ async function loadAllData(silent = false) {
         sheetIncidents = await fetchGoogleSheetAsJson(cfg.googleSheetUrl.trim());
         if (configBtn) configBtn.classList.add("connected");
         if (subtitle) {
-          subtitle.textContent = `Conectado a Google Sheets (${sheetIncidents.length} reportes en la nube)`;
+          subtitle.textContent = `Google Sheets activo (${sheetIncidents.length} reportes)`;
         }
       } catch (err) {
         console.warn("Error leyendo Google Sheet:", err);
         if (!silent) {
-          showToast("⚠️ No se pudo leer el Google Sheet. Verifica que sea público.");
+          showToast("No se pudo leer el Google Sheet. Verifica que sea público.");
         }
       }
     } else {
       if (configBtn) configBtn.classList.remove("connected");
       if (subtitle) {
-        subtitle.textContent = "Datos abiertos en tiempo real · Colaboración ciudadana";
+        subtitle.textContent = "Mapa colaborativo en tiempo real";
       }
     }
 
-    // Combinar reportes (primero los más recientes)
-    allIncidents = [...localReports, ...sheetIncidents, ...baseIncidents];
-    renderMarkers();
+    const seenIds = new Set();
+    const combined = [];
+    for (const item of [...localReports, ...sheetIncidents, ...baseIncidents]) {
+      const normalizedItem = {
+        ...item,
+        tipo: normalizeIncidentType(item.tipo)
+      };
+      // Clave única por tipo + sector + coordenadas para no duplicar entre servidor local y Google Sheets
+      const dedupeKey = `${normalizeText(normalizedItem.tipo)}|${normalizeText(normalizedItem.sector)}|${Number(normalizedItem.lat).toFixed(4)}|${Number(normalizedItem.lng).toFixed(4)}`;
+      if (!seenIds.has(dedupeKey)) {
+        seenIds.add(dedupeKey);
+        combined.push(normalizedItem);
+      }
+    }
+
+    const newSignature = JSON.stringify(combined.map((i) => i.id)) + "|" + activeFilter;
+    const hadPrevious = lastDataSignature !== "";
+    const prevCount = allIncidents.length;
+
+    allIncidents = combined;
     updateCounters();
+
+    if (!silent || newSignature !== lastDataSignature) {
+      lastDataSignature = newSignature;
+      renderMarkers();
+      if (silent && hadPrevious && combined.length > prevCount) {
+        showToast("Nuevo incidente reportado en el mapa");
+      }
+    }
   } finally {
-    if (refreshBtn) {
+    if (refreshBtn && !silent) {
       setTimeout(() => refreshBtn.classList.remove("spinning"), 350);
     }
   }
 }
 
-/**
- * Convierte cualquier Google Sheet público en un arreglo JSON de incidentes
- * Soporta:
- * - Link normal de Google Sheets (/spreadsheets/d/ID/edit...)
- * - Endpoint Google Visualization JSON (/gviz/tq?tqx=out:json)
- * - Hoja publicada en la web como CSV (/pub?output=csv)
- * - Endpoint JSON directo (Google Apps Script / OpenSheet)
- */
 async function fetchGoogleSheetAsJson(urlOrId) {
   let fetchUrl = urlOrId;
 
-  // Extraer ID si el usuario pegó el link normal de Google Sheets
   const idMatch = urlOrId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if (idMatch && !urlOrId.includes("output=csv") && !urlOrId.includes("gviz/tq")) {
     const sheetId = idMatch[1];
@@ -335,7 +361,6 @@ async function fetchGoogleSheetAsJson(urlOrId) {
 
   const text = await response.text();
 
-  // Caso A: Formato Google Visualization API (gviz/tq?tqx=out:json)
   if (text.includes("google.visualization.Query.setResponse")) {
     const jsonStart = text.indexOf("{");
     const jsonEnd = text.lastIndexOf("}");
@@ -353,31 +378,37 @@ async function fetchGoogleSheetAsJson(urlOrId) {
       .reverse();
   }
 
-  // Caso B: JSON directo (ej. Google Apps Script o JSON público)
   if (text.trim().startsWith("[") || text.trim().startsWith("{")) {
     const parsed = JSON.parse(text);
     const arr = Array.isArray(parsed) ? parsed : parsed.data || [];
     return arr
       .map((item, idx) => {
+        const rawSector = String(item.sector || item["Barrio o sector"] || item.barrio || "").trim();
+        const rawMapsUrl = String(item.mapsUrl || item["Enlace de ubicación de Google Maps"] || item.ubicacion || "").trim();
+        if (!rawSector && !rawMapsUrl) return null;
+        if (normalizeText(rawSector).includes("barrio o sector")) return null;
+
         const tipo = normalizeIncidentType(item.tipo || item["Tipo de problema"] || item.problema || "Choque");
-        const sector = item.sector || item["Barrio o sector"] || item.barrio || "Cartagena";
-        const mapsUrl = item.mapsUrl || item["Enlace de ubicación de Google Maps"] || item.ubicacion || "";
-        const coords = item.lat && item.lng ? { lat: Number(item.lat), lng: Number(item.lng) } : extractCoordinates(mapsUrl, sector);
+        const sector = rawSector || "Cartagena";
+        const coords =
+          item.lat && item.lng
+            ? { lat: Number(item.lat), lng: Number(item.lng) }
+            : extractCoordinates(rawMapsUrl, sector);
         return {
-          id: item.id || `sheet-${idx}`,
+          id: `sheet-${normalizeText(tipo)}-${normalizeText(sector)}-${coords.lat.toFixed(4)}-${coords.lng.toFixed(4)}-${idx}`,
           tipo,
           sector,
-          mapsUrl: mapsUrl || `https://www.google.com/maps?q=${coords.lat},${coords.lng}`,
+          mapsUrl: rawMapsUrl || `https://www.google.com/maps?q=${coords.lat},${coords.lng}`,
           lat: coords.lat,
           lng: coords.lng,
-          fecha: item.fecha || item["Marca temporal"] || "Reporte en Google Sheets",
+          fecha: item.fecha || item["Marca temporal"] || "En Google Sheets",
           fuente: "Google Sheets"
         };
       })
+      .filter(Boolean)
       .reverse();
   }
 
-  // Caso C: CSV publicado en la web
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length <= 1) return [];
   const headers = parseCsvLine(lines[0]).map(normalizeText);
@@ -392,7 +423,6 @@ function mapRowCellsToIncident(cells, headers, idx) {
   const nonEmpty = cells.filter((c) => c && c.trim() !== "");
   if (nonEmpty.length === 0) return null;
 
-  // Ignorar fila si coincide con los encabezados
   if (normalizeText(cells.join(" ")).includes("tipo de problema")) {
     return null;
   }
@@ -402,7 +432,6 @@ function mapRowCellsToIncident(cells, headers, idx) {
   let sector = "";
   let mapsUrl = "";
 
-  // Si Google Forms tiene 4 columnas: [Marca temporal, Tipo de problema, Barrio/Sector, Enlace Google Maps]
   if (cells.length >= 4) {
     fecha = cells[0] || "Reciente";
     tipoRaw = cells[1] || "Choque";
@@ -452,7 +481,7 @@ function parseCsvLine(line) {
 }
 
 // ============================================================================
-// 7. DIBUJAR PINES EN EL MAPA CON LEAFLET
+// 7. MARCADORES VECTORIALES ESTILO WAZE (ALTO CONTRASTE Y SOMBRAS SUAVES)
 // ============================================================================
 function renderMarkers() {
   markersLayer.clearLayers();
@@ -468,16 +497,19 @@ function renderMarkers() {
     const visual = getIncidentVisuals(inc.tipo);
 
     const icon = L.divIcon({
-      className: "custom-pin-wrapper",
+      className: "waze-marker-wrapper",
       html: `
-        <div class="pin-pulse ${visual.pulseClass}"></div>
-        <div class="pin-marker ${visual.pinClass}">
-          <span class="pin-inner">${visual.emoji}</span>
+        <div class="waze-pin-container">
+          <div class="waze-pin-halo ${visual.haloClass}"></div>
+          <div class="waze-pin-bubble ${visual.bubbleClass}">
+            ${visual.svgIcon}
+          </div>
+          <div class="waze-pin-tail"></div>
         </div>
       `,
-      iconSize: [38, 38],
-      iconAnchor: [19, 36],
-      popupAnchor: [0, -34]
+      iconSize: [48, 54],
+      iconAnchor: [24, 50],
+      popupAnchor: [0, -46]
     });
 
     const safeSector = escapeHtml(inc.sector);
@@ -489,15 +521,22 @@ function renderMarkers() {
 
     const popupHtml = `
       <div>
-        <span class="popup-badge ${visual.badgeClass}">
-          ${visual.emoji} ${escapeHtml(inc.tipo)}
+        <span class="popup-category-tag ${visual.tagClass}">
+          ${escapeHtml(inc.tipo)}
         </span>
-        <div class="popup-sector">${safeSector}</div>
-        <div class="popup-meta">
-          🕒 ${safeFecha} · 📍 ${Number(inc.lat).toFixed(4)}, ${Number(inc.lng).toFixed(4)}
+        <div class="popup-title">${safeSector}</div>
+        <div class="popup-meta-line">
+          <span>Reportado: ${safeFecha}</span>
+          <span>·</span>
+          <span>${Number(inc.lat).toFixed(4)}, ${Number(inc.lng).toFixed(4)}</span>
         </div>
-        <a class="popup-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">
-          🗺️ Ver punto en Google Maps ↗
+        <a class="popup-maps-btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">
+          <span>Abrir ubicación en Google Maps</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
         </a>
       </div>
     `;
@@ -511,25 +550,58 @@ function renderMarkers() {
 function getIncidentVisuals(tipo) {
   if (tipo === "Vía cerrada") {
     return {
-      emoji: "🚧",
-      pinClass: "pin-via",
-      pulseClass: "pulse-via",
-      badgeClass: "badge-via"
+      bubbleClass: "bubble-via",
+      haloClass: "halo-via",
+      tagClass: "tag-via",
+      svgIcon: `
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="6" rx="1.5"/>
+          <path d="M6 12v6M18 12v6M7 6l3 6M14 6l3 6"/>
+        </svg>
+      `
     };
   }
   if (tipo === "Semáforo dañado") {
     return {
-      emoji: "🚦",
-      pinClass: "pin-semaforo",
-      pulseClass: "pulse-semaforo",
-      badgeClass: "badge-semaforo"
+      bubbleClass: "bubble-semaforo",
+      haloClass: "halo-semaforo",
+      tagClass: "tag-semaforo",
+      svgIcon: `
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="2" width="10" height="20" rx="3"/>
+          <circle cx="12" cy="7" r="1.5" fill="currentColor"/>
+          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+          <circle cx="12" cy="17" r="1.5" fill="currentColor"/>
+        </svg>
+      `
+    };
+  }
+  if (tipo === "Hueco") {
+    return {
+      bubbleClass: "bubble-hueco",
+      haloClass: "halo-hueco",
+      tagClass: "tag-hueco",
+      svgIcon: `
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      `
     };
   }
   return {
-    emoji: "💥",
-    pinClass: "pin-choque",
-    pulseClass: "pulse-choque",
-    badgeClass: "badge-choque"
+    bubbleClass: "bubble-choque",
+    haloClass: "halo-choque",
+    tagClass: "tag-choque",
+    svgIcon: `
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/>
+        <circle cx="7" cy="17" r="2"/>
+        <path d="M9 17h6"/>
+        <circle cx="17" cy="17" r="2"/>
+      </svg>
+    `
   };
 }
 
@@ -538,77 +610,90 @@ function updateCounters() {
   const choques = allIncidents.filter((i) => i.tipo === "Choque").length;
   const vias = allIncidents.filter((i) => i.tipo === "Vía cerrada").length;
   const semaforos = allIncidents.filter((i) => i.tipo === "Semáforo dañado").length;
+  const huecos = allIncidents.filter((i) => i.tipo === "Hueco").length;
 
   document.getElementById("count-todos").textContent = total;
   document.getElementById("count-choque").textContent = choques;
   document.getElementById("count-via").textContent = vias;
   document.getElementById("count-semaforo").textContent = semaforos;
+  const huecoEl = document.getElementById("count-hueco");
+  if (huecoEl) huecoEl.textContent = huecos;
 }
 
 // ============================================================================
-// 8. EVENTOS DE INTERFAZ Y FORMULARIO DE REPORTE
+// 8. INTERACCIONES Y FORMULARIO PASO A PASO
 // ============================================================================
 function initUIEvents() {
-  // Filtros superiores
-  document.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      document.querySelectorAll(".chip").forEach((c) => {
-        c.classList.remove("active");
-        c.setAttribute("aria-selected", "false");
+  // Píldoras de filtro por categoría
+  document.querySelectorAll(".filter-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      document.querySelectorAll(".filter-pill").forEach((p) => {
+        p.classList.remove("active");
+        p.setAttribute("aria-selected", "false");
       });
-      chip.classList.add("active");
-      chip.setAttribute("aria-selected", "true");
-      activeFilter = chip.dataset.filter;
+      pill.classList.add("active");
+      pill.setAttribute("aria-selected", "true");
+      activeFilter = pill.dataset.filter;
+      lastDataSignature = "";
       renderMarkers();
     });
   });
 
-  // Botones de acceso rápido a corredores de Cartagena
-  document.querySelectorAll(".corridor-btn").forEach((btn) => {
+  // Salto rápido a corredores de Cartagena
+  document.querySelectorAll(".corridor-chip").forEach((btn) => {
     btn.addEventListener("click", () => {
+      document.querySelectorAll(".corridor-chip").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
       const lat = parseFloat(btn.dataset.lat);
       const lng = parseFloat(btn.dataset.lng);
       const zoom = parseInt(btn.dataset.zoom, 10) || 14;
-      map.flyTo([lat, lng], zoom, { duration: 0.8 });
+      map.flyTo([lat, lng], zoom, { duration: 0.85 });
     });
   });
 
-  // Botón refrescar
-  document.getElementById("btn-refresh").addEventListener("click", () => {
-    loadAllData(false);
-    showToast("🔄 Mapa actualizado con los últimos reportes");
+  // Controles de zoom táctiles
+  document.getElementById("btn-zoom-in").addEventListener("click", () => map.zoomIn());
+  document.getElementById("btn-zoom-out").addEventListener("click", () => map.zoomOut());
+
+  // Botón sincronizar
+  document.getElementById("btn-refresh").addEventListener("click", async () => {
+    await syncPendingLocalReportsToServer();
+    lastDataSignature = "";
+    await loadAllData(false);
+    showToast("Mapa sincronizado en tiempo real");
   });
 
-  // Botón centrar en mi ubicación
+  // Botón centrar en mi ubicación actual
   document.getElementById("btn-locate-me").addEventListener("click", () => {
     if (!navigator.geolocation) {
-      showToast("⚠️ Tu navegador no soporta geolocalización");
+      showToast("Tu navegador no soporta geolocalización");
       return;
     }
-    showToast("📍 Obteniendo tu ubicación actual...");
+    showToast("Obteniendo tu ubicación GPS...");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
         map.flyTo([latitude, longitude], 16, { duration: 0.9 });
         L.circleMarker([latitude, longitude], {
           radius: 8,
-          color: "#2563eb",
-          fillColor: "#3b82f6",
-          fillOpacity: 0.9
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#2563eb",
+          fillOpacity: 1
         })
           .addTo(map)
-          .bindPopup("📍 Estás aquí")
+          .bindPopup("<strong>Tu ubicación actual</strong>")
           .openPopup();
       },
       () => {
-        showToast("ℹ️ Mostrando vista central de Cartagena");
+        showToast("Mostrando vista central de Cartagena");
         map.flyTo(DEFAULT_CONFIG.cartagenaCenter, 14);
       },
       { enableHighAccuracy: true, timeout: 6000 }
     );
   });
 
-  // Abrir / Cerrar Modal de Reportar Incidente
+  // Abrir y cerrar Side-Panel de reporte
   const modalReport = document.getElementById("modal-report");
   document.getElementById("btn-report-incident").addEventListener("click", () => {
     updateExternalFormBanner();
@@ -618,7 +703,7 @@ function initUIEvents() {
     modalReport.classList.add("hidden");
   });
 
-  // Sugerencias rápidas de sector
+  // Etiquetas rápidas de sector
   document.querySelectorAll(".sector-pill").forEach((pill) => {
     pill.addEventListener("click", () => {
       const sectorInput = document.getElementById("input-sector");
@@ -627,11 +712,10 @@ function initUIEvents() {
     });
   });
 
-  // Vista previa de coordenadas al escribir link o sector
   document.getElementById("input-maps-url").addEventListener("input", updateCoordPreview);
   document.getElementById("input-sector").addEventListener("input", updateCoordPreview);
 
-  // Botón "Generar link con mi GPS" dentro del formulario
+  // Botón principal "Usar mi ubicación actual" con GPS
   document.getElementById("btn-use-gps").addEventListener("click", () => {
     const mapsInput = document.getElementById("input-maps-url");
     if (!navigator.geolocation) {
@@ -641,26 +725,26 @@ function initUIEvents() {
       return;
     }
 
-    showToast("📍 Obteniendo coordenadas del GPS...");
+    showToast("Obteniendo coordenadas exactas del GPS...");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = pos.coords.latitude.toFixed(6);
         const lng = pos.coords.longitude.toFixed(6);
         mapsInput.value = `https://www.google.com/maps?q=${lat},${lng}`;
         updateCoordPreview();
-        showToast("✅ Enlace de Google Maps generado con tu GPS");
+        showToast("Ubicación GPS capturada con éxito");
       },
       () => {
         const center = map.getCenter();
         mapsInput.value = `https://www.google.com/maps?q=${center.lat.toFixed(6)},${center.lng.toFixed(6)}`;
         updateCoordPreview();
-        showToast("📍 Se usó el punto central actual del mapa");
+        showToast("Se tomó el punto central actual del mapa");
       },
       { enableHighAccuracy: true, timeout: 5000 }
     );
   });
 
-  // Botón "Elegir punto en el mapa"
+  // Botón "Marcar punto en el mapa"
   document.getElementById("btn-pick-on-map").addEventListener("click", () => {
     modalReport.classList.add("hidden");
     isPickingOnMap = true;
@@ -673,7 +757,7 @@ function initUIEvents() {
     modalReport.classList.remove("hidden");
   });
 
-  // Envío del formulario de 3 preguntas
+  // Envío del reporte
   document.getElementById("form-incident").addEventListener("submit", handleReportSubmit);
 
   // Modal JSON Abierto
@@ -687,7 +771,7 @@ function initUIEvents() {
   });
   document.getElementById("btn-copy-json").addEventListener("click", () => {
     navigator.clipboard.writeText(JSON.stringify(allIncidents, null, 2));
-    showToast("📋 JSON copiado al portapapeles");
+    showToast("JSON copiado al portapapeles");
   });
   document.getElementById("btn-download-json").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(allIncidents, null, 2)], { type: "application/json" });
@@ -698,14 +782,20 @@ function initUIEvents() {
     a.click();
     URL.revokeObjectURL(url);
   });
-  document.getElementById("btn-reset-demo").addEventListener("click", () => {
+  document.getElementById("btn-reset-demo").addEventListener("click", async () => {
     localStorage.removeItem(STORAGE_KEYS.LOCAL_REPORTS);
-    loadAllData();
+    try {
+      await fetch("/api/reset", { method: "POST" });
+    } catch {
+      // Ignorar si no hay servidor con API
+    }
+    lastDataSignature = "";
+    await loadAllData();
     modalJson.classList.add("hidden");
-    showToast("🔄 Datos restaurados al estado inicial");
+    showToast("Datos restaurados al estado inicial");
   });
 
-  // Modal Configuración Google Sheets / Forms
+  // Modal Configuración Google Sheets
   const modalConfig = document.getElementById("modal-config");
   document.getElementById("btn-open-config").addEventListener("click", () => {
     const cfg = getConfig();
@@ -720,15 +810,15 @@ function initUIEvents() {
   document.getElementById("btn-test-sheet").addEventListener("click", async () => {
     const url = document.getElementById("input-sheet-url").value.trim();
     if (!url) {
-      showToast("⚠️ Pega primero el enlace de tu Google Sheet");
+      showToast("Pega primero el enlace de tu Google Sheet");
       return;
     }
     try {
-      showToast("🔍 Probando lectura JSON desde Google Sheets...");
+      showToast("Verificando lectura JSON desde Google Sheets...");
       const items = await fetchGoogleSheetAsJson(url);
-      showToast(`✅ Conexión exitosa: ${items.length} filas leídas del Sheet`);
+      showToast(`Conexión exitosa: ${items.length} reportes leídos`);
     } catch {
-      showToast("❌ No se pudo leer. Asegúrate de compartir el Sheet como 'Cualquier persona con el enlace'");
+      showToast("No se pudo leer. Comparte el Sheet como 'Cualquier persona con el enlace'");
     }
   });
 
@@ -738,12 +828,12 @@ function initUIEvents() {
     const googleFormUrl = document.getElementById("input-form-url").value.trim();
     saveConfig({ googleSheetUrl, googleFormUrl });
     modalConfig.classList.add("hidden");
+    lastDataSignature = "";
     loadAllData();
-    showToast("✅ Configuración guardada");
+    showToast("Configuración guardada correctamente");
   });
 
-  // Cerrar modales al tocar el fondo oscuro
-  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+  document.querySelectorAll(".panel-backdrop").forEach((backdrop) => {
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) {
         backdrop.classList.add("hidden");
@@ -760,10 +850,11 @@ function finishPickingOnMap(lat, lng) {
     map.removeLayer(tempPickMarker);
   }
   tempPickMarker = L.circleMarker([lat, lng], {
-    radius: 7,
-    color: "#dc2626",
-    fillColor: "#ef4444",
-    fillOpacity: 0.85
+    radius: 8,
+    color: "#ffffff",
+    weight: 3,
+    fillColor: "#ff3b30",
+    fillOpacity: 1
   }).addTo(map);
 
   const mapsInput = document.getElementById("input-maps-url");
@@ -771,7 +862,7 @@ function finishPickingOnMap(lat, lng) {
   updateCoordPreview();
 
   document.getElementById("modal-report").classList.remove("hidden");
-  showToast(`📍 Punto seleccionado (${lat}, ${lng})`);
+  showToast(`Punto fijado en el mapa (${lat}, ${lng})`);
 }
 
 function updateCoordPreview() {
@@ -780,12 +871,12 @@ function updateCoordPreview() {
   const preview = document.getElementById("coord-preview");
 
   if (!mapsUrl && !sector) {
-    preview.textContent = "Puedes pegar un link de Google Maps, usar tu GPS en 1 toque o tocar el punto en el mapa.";
+    preview.textContent = 'Toca "Usar mi ubicación actual", marca el punto en el mapa o pega un link de Google Maps.';
     return;
   }
 
   const coords = extractCoordinates(mapsUrl, sector);
-  preview.textContent = `📌 Pin listo en: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)} (${coords.metodo})`;
+  preview.textContent = `Coordenadas listas: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)} · ${coords.metodo}`;
 }
 
 async function handleReportSubmit(e) {
@@ -797,7 +888,7 @@ async function handleReportSubmit(e) {
   const mapsUrl = (formData.get("mapsUrl") || "").trim();
 
   if (!sector || !mapsUrl) {
-    showToast("⚠️ Por favor completa el barrio/sector y el enlace de ubicación");
+    showToast("Completa la ubicación y el barrio o sector de referencia");
     return;
   }
 
@@ -813,19 +904,32 @@ async function handleReportSubmit(e) {
     fuente: "Colaboración ciudadana"
   };
 
-  // 1. Guardar inmediatamente y mostrar el pin en el mapa
-  const currentLocal = getLocalReports();
-  currentLocal.unshift(newIncident);
-  localStorage.setItem(STORAGE_KEYS.LOCAL_REPORTS, JSON.stringify(currentLocal));
+  let savedToSharedServer = false;
+  try {
+    const res = await fetch("/api/incidentes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newIncident)
+    });
+    if (res.ok) {
+      savedToSharedServer = true;
+    }
+  } catch {
+    savedToSharedServer = false;
+  }
 
-  // 2. Si el usuario configuró un endpoint de Google Apps Script, enviarlo también a la nube
+  if (!savedToSharedServer) {
+    const currentLocal = getLocalReports();
+    currentLocal.unshift(newIncident);
+    localStorage.setItem(STORAGE_KEYS.LOCAL_REPORTS, JSON.stringify(currentLocal));
+  }
+
   const cfg = getConfig();
   if (cfg.googleFormUrl && cfg.googleFormUrl.includes("script.google.com")) {
     try {
-      fetch(cfg.googleFormUrl, {
+      await fetch(cfg.googleFormUrl, {
         method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(newIncident)
       });
     } catch (err) {
@@ -833,7 +937,6 @@ async function handleReportSubmit(e) {
     }
   }
 
-  // Limpiar formulario y cerrar modal
   e.target.reset();
   if (tempPickMarker) {
     map.removeLayer(tempPickMarker);
@@ -841,15 +944,15 @@ async function handleReportSubmit(e) {
   }
   document.getElementById("modal-report").classList.add("hidden");
 
-  // Actualizar el mapa y volar hacia el nuevo pin
-  await loadAllData(true);
+  lastDataSignature = "";
+  await loadAllData(false);
   map.flyTo([newIncident.lat, newIncident.lng], 16, { duration: 0.9 });
 
-  showToast("✅ ¡Incidente publicado en el mapa de Cartagena!");
+  showToast("Reporte publicado en el mapa en tiempo real");
 }
 
 // ============================================================================
-// 9. UTILIDADES DE ALMACENAMIENTO Y CONFIGURACIÓN
+// 9. UTILIDADES
 // ============================================================================
 function getLocalReports() {
   try {
